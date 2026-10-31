@@ -188,23 +188,16 @@ namespace ClassicSlimes
                 m.Kw("_ENABLETWINEFFECT_ON", false); m.Flt("_EnableTwinEffect", 0f);
                 m.Kw("_ENABLEVORTEX_ON", false);
                 m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
-                m.Tx("_ColorMask", Gfx.SwirlMask);
+                m.Tx("_ColorMask", Res.Tex("msk_quantumSpiral", true, false) ?? Gfx.SwirlMask);   // SR1 quantumStatic spiral
                 m.SetTextureScale("_ColorMask", Gfx.SwirlScale);
                 m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
                 m.Flt("_ColorMaskUV1", 0f);
-                m.Col("_RedTopColor", new Color(1f, 0.96f, 0.66f)); m.Col("_RedMiddleColor", new Color(1f, 0.90f, 0.52f)); m.Col("_RedBottomColor", new Color(1f, 0.80f, 0.40f));
+                m.Col("_RedTopColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedMiddleColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedBottomColor", new Color(1f, 0.94f, 0.58f));
                 m.Col("_GreenTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_GreenMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_GreenBottomColor", new Color(1f, 0.65f, 0.25f));
                 m.Col("_BlueTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_BlueMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_BlueBottomColor", new Color(1f, 0.65f, 0.25f));
                 m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
-                if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
-                {
-                    m.Flt("_EnableHyperEffect", 1f);
-                    m.Col("_HyperFresnelColor", new Color(1f, 0.95f, 0.55f, 0f));
-                    m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
-                    m.Flt("_HyperFresnelIntensity", 1.4f);
-                    m.Flt("_HyperFresnelSparksNoiseIntensity", 20f);
-                    m.Flt("_HyperFresnelSecondaryNoiseIntensity", 10f);
-                }
+                // hyper fresnel washed the golden body out to pale yellow; SR1 quantum is plain golden with one light swirl
+                m.Kw("_ENABLEHYPEREFFECT_ON", false); m.Flt("_EnableHyperEffect", 0f);
                 m.Flt("_GlossPower", 0.6f);
                 Keep(m, "Quantum");
                 SetBodyMaterial(app, m);
@@ -255,8 +248,9 @@ namespace ClassicSlimes
                 if (_holo != null) return _holo;
                 var m = Mat.Clone("QuantumHolo", "DefaultHDParticleMaterial") ?? Mat.CloneByShader("QuantumHolo", "HDRP/Unlit");
                 if (m == null) return null;
-                m.Tx("_UnlitColorMap", Gfx.ScanlineTex);
-                m.Col("_UnlitColor", new Color(1f, 0.93f, 0.55f, 0.85f));
+                // scanlines + SR1 quantum static + a bright glitch band (white, the alpha carries the look)
+                m.Tx("_UnlitColorMap", Res.Tex("fx_quantumHolo") ?? Gfx.ScanlineTex);
+                m.Col("_UnlitColor", new Color(1f, 0.85f, 0.35f, 0.75f));
                 _holo = Keep(m, "QuantumHolo");
                 return _holo;
             }

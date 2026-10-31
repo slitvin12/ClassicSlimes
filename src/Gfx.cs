@@ -246,7 +246,7 @@ namespace ClassicSlimes
         /// channel, tileable (wrapped distances), anti-aliased.
         /// </summary>
         /// <summary>Placement of the quantum swirl on the body UVs (tunable live with the "texst" dev command).</summary>
-        public static Vector2 SwirlScale = new Vector2(1f, 1f), SwirlOffset = new Vector2(0f, 0f);
+        public static Vector2 SwirlScale = new Vector2(1f, 1f), SwirlOffset = new Vector2(0f, 0.25f);   // centre of the spiral a bit above the mouth
 
         /// <summary>
         /// SR1 quantum body: ONE big light swirl (~2.6 turns, the arm thins out towards its outer end, bright dot in

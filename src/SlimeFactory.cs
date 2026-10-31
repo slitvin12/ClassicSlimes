@@ -239,6 +239,15 @@ namespace ClassicSlimes
                 ClassicSlimesMod.Log.Msg($"  {s.Name} fullArt def={fa(def._fullArt)} app={fa(app._fullArt)} requires={def.RequiresFullArt}/{app.RequiresFullArt}");
             }
             catch { }
+            // the cloned def/appearance still reference the Pink Slime full art -> pedia showed a pink slime
+            try
+            {
+                def._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
+                def._requiresFullArt = false;
+                app._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
+                ClassicSlimesMod.Log.Msg($"  {s.Name} fullArt cleared requires={def.RequiresFullArt}/{app.RequiresFullArt}");
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning($"Full art {s.Name}: {e.Message}"); }
             try
             {
                 var art = Res.Bytes("pediaSlime" + s.Name + ".png") != null ? Res.Sprite("pediaSlime" + s.Name) : icon;

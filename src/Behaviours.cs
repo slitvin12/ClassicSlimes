@@ -211,14 +211,30 @@ namespace ClassicSlimes
         }
 
         // ------------------------------------------------------------- hologram "phase" blink
-        // SR1 quantum shader: the slime now and then drops out of phase - the body flickers away and only horizontal
-        // hologram scanlines are left for a moment.
+        // SR1 quantum shader: now and then the slime drops out of phase - the body turns into a see-through hologram
+        // (same shape, still animated: the body materials are swapped for a transparent scanline/static material with a
+        // jumping glitch band) for a second or two, flickering back to solid for a frame now and then. Between phases it
+        // has short glitch twitches. Fallback (no body material found): hide the renderers and show a scanline sphere.
+        class Swap { public Renderer R; public int[] Idx; public Material[] Orig; }
         GameObject _holo;
+        Material _holoMat;
+        readonly List<Swap> _swapped = new();
         readonly List<Renderer> _hidden = new();
-        float _nextPhase, _phaseEnd, _nextFlick;
-        bool _bodyOff, _phaseErr, _wallErr;
+        float _nextPhase, _phaseEnd, _nextFlick, _nextGlitch, _nextJump;
+        bool _bodyOff, _fullPhase, _phaseErr, _wallErr;
+        Vector2 _holoOfs;
 
         float PhaseDelay() => Mathf.Lerp(14f, 4f, U.Agitation(_emo)) * U.Rand(0.7f, 1.3f);
+
+        Material HoloInstance()
+        {
+            if (_holoMat != null) return _holoMat;
+            var src = Visuals.HoloMat;
+            if (src == null) return null;
+            _holoMat = new Material(src) { name = "QuantumHoloBody" };
+            _holoMat.SetTextureScale("_UnlitColorMap", new Vector2(1f, 1.5f));
+            return _holoMat;
+        }
 
         void UpdatePhase()
         {
@@ -227,47 +243,91 @@ namespace ClassicSlimes
             if (_phaseEnd > 0f)
             {
                 if (now >= _phaseEnd || held || !Cfg.QuantumHologram.Value) { EndPhase(); return; }
-                if (now >= _nextFlick)
+                if (_fullPhase && now >= _nextFlick)
                 {
-                    _nextFlick = now + (_bodyOff ? U.Rand(0.05f, 0.12f) : U.Rand(0.03f, 0.07f));
+                    // mostly hologram, short flicker-ins of the solid body
+                    _nextFlick = now + (_bodyOff ? U.Rand(0.15f, 0.45f) : U.Rand(0.03f, 0.07f));
                     SetBodyOff(!_bodyOff);
                 }
-                var mat = Visuals.HoloMat;
-                if (mat != null) mat.SetTextureOffset("_UnlitColorMap", new Vector2(0f, -now * 1.7f));
+                if (now >= _nextJump)
+                {
+                    // glitch: the static / band jumps to a random spot
+                    _nextJump = now + U.Rand(0.05f, 0.18f);
+                    _holoOfs = new Vector2(U.Rand(0f, 1f), U.Rand(0f, 1f));
+                }
+                var ofs = new Vector2(_holoOfs.x, _holoOfs.y - now * 0.6f);
+                if (_holoMat != null) _holoMat.SetTextureOffset("_UnlitColorMap", ofs);
+                if (_holo != null) { var hm = Visuals.HoloMat; if (hm != null) hm.SetTextureOffset("_UnlitColorMap", ofs); }
                 return;
             }
-            if (_nextPhase <= 0f) _nextPhase = now + U.Rand(3f, 10f);
-            if (held || !Cfg.QuantumHologram.Value || now < _nextPhase) return;
-            StartPhase(U.Rand(0.45f, 0.85f));
+            if (_nextPhase <= 0f) { _nextPhase = now + U.Rand(3f, 10f); _nextGlitch = now + U.Rand(2f, 5f); }
+            if (held || !Cfg.QuantumHologram.Value) return;
+            if (now >= _nextPhase) { StartPhase(U.Rand(1.2f, 2.2f)); return; }
+            if (now >= _nextGlitch)
+            {
+                _nextGlitch = now + Mathf.Lerp(8f, 2.5f, U.Agitation(_emo)) * U.Rand(0.7f, 1.3f);
+                if (_nextPhase - now > 1f) StartPhase(U.Rand(0.12f, 0.25f), false);
+            }
         }
 
-        public void StartPhase(float seconds)
+        public void StartPhase(float seconds) => StartPhase(seconds, true);
+
+        void StartPhase(float seconds, bool full)
         {
-            if (_phaseEnd > 0f) { _phaseEnd = Mathf.Max(_phaseEnd, Time.time + seconds); return; }
-            _phaseEnd = Time.time + seconds;
-            _nextFlick = Time.time + 0.04f;
-            _nextPhase = _phaseEnd + PhaseDelay();
-            if (_holo == null)
+            float now = Time.time;
+            if (_phaseEnd > 0f) { _phaseEnd = Mathf.Max(_phaseEnd, now + seconds); _fullPhase |= full; return; }
+            _phaseEnd = now + seconds;
+            _fullPhase = full;
+            _nextFlick = now + U.Rand(0.25f, 0.5f);
+            _nextJump = 0f;
+            if (full) _nextPhase = _phaseEnd + PhaseDelay();
+            _nextGlitch = Mathf.Max(_nextGlitch, _phaseEnd + U.Rand(1.5f, 4f));
+            _swapped.Clear(); _hidden.Clear();
+            var holo = HoloInstance();
+            var all = GetComponentsInChildren<Renderer>();
+            foreach (var r in all)
             {
-                _holo = Visuals.MakeHolo(transform);
-                var mat = Visuals.HoloMat;
-                if (mat != null) mat.SetTextureScale("_UnlitColorMap", new Vector2(1f, 2.5f));
+                if (!Phaseable(r) || holo == null) continue;
+                var mats = r.sharedMaterials;
+                if (mats == null || mats.Length == 0) continue;
+                var idx = new List<int>();
+                var orig = new Material[mats.Length];
+                for (int i = 0; i < mats.Length; i++)
+                {
+                    var m = mats[i];
+                    orig[i] = m;
+                    var sh = m != null ? m.shader : null;
+                    if (sh != null && sh.name.Contains("Slime/Body")) idx.Add(i);
+                }
+                if (idx.Count > 0) _swapped.Add(new Swap { R = r, Idx = idx.ToArray(), Orig = orig });
             }
-            if (_holo != null) _holo.SetActive(true);
-            _hidden.Clear();
-            foreach (var r in GetComponentsInChildren<Renderer>())
+            if (_swapped.Count == 0)
             {
-                if (r == null || !r.enabled || r.TryCast<ParticleSystemRenderer>() != null) continue;
-                if (_holo != null && r.transform.IsChildOf(_holo.transform)) continue;
-                if (r.GetComponentInParent<RadSlime>() != null && r.name.StartsWith("Rad")) continue;   // largo auras
-                _hidden.Add(r);
+                if (_holo == null) _holo = Visuals.MakeHolo(transform);
+                if (_holo != null) _holo.SetActive(true);
+                foreach (var r in all) if (Phaseable(r)) _hidden.Add(r);
             }
             SetBodyOff(true);
+        }
+
+        bool Phaseable(Renderer r)
+        {
+            if (r == null || !r.enabled || r.TryCast<ParticleSystemRenderer>() != null) return false;
+            if (_holo != null && r.transform.IsChildOf(_holo.transform)) return false;
+            if (r.GetComponentInParent<RadSlime>() != null && r.name.StartsWith("Rad")) return false;   // largo auras
+            return true;
         }
 
         void SetBodyOff(bool off)
         {
             _bodyOff = off;
+            foreach (var s in _swapped)
+            {
+                if (s.R == null) continue;
+                var mats = s.R.sharedMaterials;
+                foreach (var i in s.Idx) if (i < mats.Length) mats[i] = off ? _holoMat : s.Orig[i];
+                s.R.sharedMaterials = mats;
+            }
             foreach (var r in _hidden) if (r != null) r.enabled = !off;
         }
 
@@ -275,7 +335,7 @@ namespace ClassicSlimes
         {
             _phaseEnd = 0f;
             SetBodyOff(false);
-            _hidden.Clear();
+            _swapped.Clear(); _hidden.Clear();
             if (_holo != null) _holo.SetActive(false);
         }
 
@@ -392,6 +452,7 @@ namespace ClassicSlimes
             foreach (var g in _ghosts) if (g != null) Object.Destroy(g.gameObject);
             _ghosts.Clear();
             try { RestoreWalls(); } catch { }
+            if (_holoMat != null) Object.Destroy(_holoMat);
         }
     }
 

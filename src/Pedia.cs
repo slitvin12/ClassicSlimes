@@ -12,15 +12,17 @@ namespace ClassicSlimes
     /// <summary>
     /// Slimepedia picture for our slimes. The cloned pink appearance still points at the Pink Slime full art
     /// (addressable), so the pedia showed a pink slime. SR1's slimepedia used the slime's sticker art, so we put our
-    /// icon (or an optional pediaSlimeX.png) into the big picture and keep re-applying it for a few seconds, because
-    /// the game loads the full art asynchronously and would overwrite it.
+    /// icon (or an optional pediaSlimeX.png) into the big picture and keep re-applying it while the page is shown,
+    /// because the game loads the full art asynchronously and would overwrite it.
     /// </summary>
     public static class PediaArt
     {
         static readonly Dictionary<IntPtr, Sprite> Art = new();
-        static PediaEntryIconAndHighlights _view;
-        static Sprite _sprite;
-        static float _until;
+        // every icon view that currently shows one of our entries (the details page has several of them, e.g. the
+        // default and the slime icon highlights; only one is visible) - re-applied every frame while it is active
+        static readonly Dictionary<IntPtr, PediaEntryIconAndHighlights> Views = new();
+        static readonly List<IntPtr> Drop = new();
+        static readonly HashSet<IntPtr> Logged = new();
         static bool _err;
 
         public static void Register(IdentifiableType ident, Sprite art)
@@ -40,17 +42,22 @@ namespace ClassicSlimes
 
         public static void Shown(PediaEntryIconAndHighlights view, PediaEntry entry)
         {
+            if (view == null) return;
             var sp = For(entry);
-            if (sp == null) { if (_view != null && view != null && _view.Pointer == view.Pointer) _view = null; return; }
-            _view = view; _sprite = sp; _until = Time.unscaledTime + 5f;
-            Apply();
+            if (sp == null) { Views.Remove(view.Pointer); return; }
+            Views[view.Pointer] = view;
+            Apply(view, sp);
         }
 
-        static void Apply()
+        static void Apply(PediaEntryIconAndHighlights view, Sprite sp)
         {
-            var img = _view?._primaryIcon;
+            var img = view._primaryIcon;
             if (img == null) return;
-            if (img.sprite == null || img.sprite.Pointer != _sprite.Pointer) img.sprite = _sprite;
+            if (img.sprite == null || img.sprite.Pointer != sp.Pointer)
+            {
+                img.sprite = sp;
+                if (Logged.Add(sp.Pointer)) ClassicSlimesMod.Log.Msg($"Pedia art: {sp.name} -> {view.name}");
+            }
             img.preserveAspect = true;
             if (!img.enabled) img.enabled = true;
             var c = img.color;
@@ -59,17 +66,25 @@ namespace ClassicSlimes
 
         public static void Tick()
         {
-            if (_view == null) return;
-            try
+            if (Views.Count == 0) return;
+            Drop.Clear();
+            foreach (var kv in Views)
             {
-                if (Time.unscaledTime > _until || !_view.isActiveAndEnabled || For(_view._currentEntry) == null) { _view = null; return; }
-                Apply();
+                try
+                {
+                    var v = kv.Value;
+                    if (v == null) { Drop.Add(kv.Key); continue; }
+                    var sp = For(v._currentEntry);
+                    if (sp == null) { Drop.Add(kv.Key); continue; }
+                    if (v.isActiveAndEnabled) Apply(v, sp);
+                }
+                catch (Exception e)
+                {
+                    Drop.Add(kv.Key);
+                    if (!_err) { _err = true; ClassicSlimesMod.Log.Warning("Pedia art: " + e.Message); }
+                }
             }
-            catch (Exception e)
-            {
-                _view = null;
-                if (!_err) { _err = true; ClassicSlimesMod.Log.Warning("Pedia art: " + e.Message); }
-            }
+            foreach (var k in Drop) Views.Remove(k);
         }
     }
 

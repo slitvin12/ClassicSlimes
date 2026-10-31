@@ -71,7 +71,7 @@ namespace ClassicSlimes
                     m.Col("_EyeRed", new Color(0.62f, 1f, 0.16f, 1f));
                     m.Col("_EyeGreen", new Color(0.86f, 1f, 0.34f, 1f));
                     m.Col("_EyeBlue", new Color(1f, 1f, 0.85f, 1f));
-                    m.Col("_GlowColor", new Color(0.55f, 1f, 0.12f, 1f));
+                    m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));   // the glow layer drew a white blob + extra smile arcs
                     Mats["RadEyes_" + e.name] = m;
                     return m;
                 },
@@ -81,7 +81,7 @@ namespace ClassicSlimes
                     m.Col("_MouthTop", new Color(0.02f, 0.20f, 0.05f, 1f));
                     m.Col("_MouthMid", new Color(0.50f, 0.95f, 0.14f, 1f));
                     m.Col("_MouthBot", new Color(0.88f, 1f, 0.32f, 1f));
-                    m.Col("_GlowColor", new Color(0.55f, 1f, 0.12f, 1f));
+                    m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));   // the glow layer drew a white blob + extra smile arcs
                     Mats["RadMouth_" + mo.name] = m;
                     return m;
                 });
@@ -100,7 +100,7 @@ namespace ClassicSlimes
                     m.Col("_EyeRed", new Color(1f, 0.93f, 0.42f, 1f));
                     m.Col("_EyeGreen", new Color(1f, 0.97f, 0.55f, 1f));
                     m.Col("_EyeBlue", new Color(1f, 1f, 0.92f, 1f));
-                    m.Col("_GlowColor", new Color(1f, 0.85f, 0.15f, 1f));
+                    m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));
                     Mats["QuantumEyes_" + e.name] = m;
                     return m;
                 },
@@ -183,7 +183,7 @@ namespace ClassicSlimes
                 m.Flt("_GlowMax", 1f);
                 m.Flt("_GlossPower", 0.6f);
                 m.Kw("_ENABLEHYPEREFFECT_ON", false); m.Flt("_EnableHyperEffect", 0f);
-                m.Kw("_ENABLEVORTEX_ON", false);
+                m.Kw("_ENABLEVORTEX_ON", false); m.Flt("_EnableVortex", 0f);
                 SetBodyMaterial(app, m);
             }
             try { var f = RadFace(app._face); if (f != null) app._face = f; }
@@ -233,18 +233,18 @@ namespace ClassicSlimes
                 case 0:   // SR1 RadAura: one clear sphere that refracts what is behind it, soft green fresnel edge
                     m = Mat.Clone("RadDome0", "envLabGlass", "SimpleGlass");
                     if (m == null) break;
-                    m.Col("_Color", new Color(0.20f, 0.95f, 0.28f, 0f));
-                    m.Flt("_Opacity", 0.10f);
+                    m.Col("_Color", new Color(0.10f, 1f, 0.16f, 0f));
+                    m.Flt("_Opacity", 0.22f);
                     m.Flt("_Smoothness", 0.9f);
                     m.Flt("_Metallic", 0.2f);
                     m.Tx("_NormalMap", GameTex("dptNoiseClouds") ?? GameTex("nrm_envGlass01"));
                     m.Flt("_NormalStrength", 0.35f);
                     m.Tx("_Reflection", RadRimTex);
-                    m.Flt("_ReflectionIntensity", 6f);
+                    m.Flt("_ReflectionIntensity", 12f);
                     m.Flt("_ReflectionFresnelScale", 1.2f);
-                    m.Flt("_ReflectionFresnelPower", 2.6f);
+                    m.Flt("_ReflectionFresnelPower", 1.8f);
                     m.Flt("_ReflectionNormalStrength", 0.1f);
-                    m.Col("_ReflectionTint", new Color(0.30f, 1f, 0.32f, 0f));
+                    m.Col("_ReflectionTint", new Color(0.18f, 1f, 0.20f, 0f));
                     m.Flt("_DistortionStrength", 26f);
                     m.Flt("_DistortionBlur", 0.015f);
                     m.Flt("_FresnelDistortionBlur", 0.25f);
@@ -351,52 +351,36 @@ namespace ClassicSlimes
             m.Flt("_BaseMapColor", 0f);
             m.Flt("_DistortionStrength", 2f);
             m.Flt("_ReflectionIntensity", 60f);
-            m.Col("_ReflectionTint", new Color(0.72f, 0.80f, 1f, 0f));
-            m.Flt("_ReflectionFresnelPower", 2.2f);
+            m.Col("_ReflectionTint", new Color(0.8f, 0.92f, 1f, 0f));
             _shell = Keep(m, "MosaicShell");
             return _shell;
         }
 
         /// <summary>
         /// SR1 slimeMosaic_base: msk_mosaic (R/G/B tiles) indexes a rainbow ramp, nrm_mosaic bevels each tile.
-        /// SR1 look: green / yellow-green at the top, yellow in the middle, orange at the bottom, a few blue / purple
-        /// tiles, bright glassy seams and an iridescent blue-violet rim. SR2 equivalent: the multi-colour body shader
-        /// (colour mask + normals) with a vertical gradient per channel; black mask = the glass seams; the hyper
-        /// fresnel (on the flutter "hyper normal" material that has multi colour + normals + hyper) draws the rim.
+        /// SR2 equivalent: the multi-colour body shader (colour mask + normals) with a vertical rainbow per channel,
+        /// blue/teal at the top, green/yellow in the middle, orange at the bottom; black mask = bright grout.
+        /// The template already uses exactly the keyword set we need (alpha test + multi colour + normals).
         /// </summary>
         static Material MosaicBodyMat(SlimeSpec s)
         {
-            var m = Mat.Clone("MosaicBody", "slimeFlutterWingFlutterNormalHyperNormal", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
+            var m = Mat.Clone("MosaicBody", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
             if (m == null) return null;
-            m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
-            // seams: light glassy blue (not white - white seams washed the whole slime out)
-            m.Palette(new Color(0.42f, 0.52f, 1f), new Color(0.55f, 0.68f, 1f), new Color(0.70f, 0.72f, 1f));
+            // SR1 mosaic: deep blue glass with green / orange / yellow / sky-blue tiles. SR2's body gradient mostly blends
+            // middle and bottom, so the blue base is kept on all three stops and the tile groups shift colour downwards.
+            m.Palette(new Color(0.15f, 0.40f, 1f), new Color(0.12f, 0.32f, 0.95f), new Color(0.10f, 0.28f, 0.85f));
             m.Tx("_ColorMask", Res.Tex("msk_mosaic", true));
             m.Flt("_ColorMaskUV1", 0f);
-            // SR1 tiles: blue / violet / cyan at the top, greens in the middle, yellow / orange / red at the bottom
-            m.Col("_RedTopColor", new Color(0.25f, 0.40f, 1f)); m.Col("_RedMiddleColor", new Color(0.25f, 0.85f, 0.25f)); m.Col("_RedBottomColor", new Color(1f, 0.58f, 0.08f));
-            m.Col("_GreenTopColor", new Color(0.50f, 0.32f, 0.95f)); m.Col("_GreenMiddleColor", new Color(0.62f, 0.92f, 0.12f)); m.Col("_GreenBottomColor", new Color(1f, 0.85f, 0.10f));
-            m.Col("_BlueTopColor", new Color(0.20f, 0.70f, 0.95f)); m.Col("_BlueMiddleColor", new Color(0.20f, 0.78f, 0.40f)); m.Col("_BlueBottomColor", new Color(0.95f, 0.30f, 0.10f));
+            m.Col("_RedTopColor", new Color(0.45f, 0.80f, 1f)); m.Col("_RedMiddleColor", new Color(0.35f, 0.90f, 0.30f)); m.Col("_RedBottomColor", new Color(1f, 0.50f, 0.10f));
+            m.Col("_GreenTopColor", new Color(0.20f, 0.50f, 1f)); m.Col("_GreenMiddleColor", new Color(0.30f, 0.75f, 1f)); m.Col("_GreenBottomColor", new Color(0.40f, 0.90f, 0.30f));
+            m.Col("_BlueTopColor", new Color(1f, 0.85f, 0.20f)); m.Col("_BlueMiddleColor", new Color(1f, 0.65f, 0.15f)); m.Col("_BlueBottomColor", new Color(1f, 0.40f, 0.10f));
             m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
-            m.Kw("_ENABLENORMALS_ON", true); m.Flt("_EnableNormals", 1f);
             m.Tx("_Normal", Res.Tex("nrm_mosaic", true));
             m.Flt("_NormalUV1", 0f);
             m.Flt("_NormalSmoothTop", 0f);
             m.Flt("_NormalPanX", 0f); m.Flt("_NormalPanY", 0f);
-            m.Flt("_GlossPower", 0.95f);
-            m.Flt("_BodyLightingContribution", 0.8f);
-            if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
-            {
-                m.Flt("_EnableHyperEffect", 1f);
-                // only a soft violet edge: no hyper noise arcs, no strong soft glow over the whole body
-                m.Col("_HyperFresnelColor", new Color(0.55f, 0.50f, 1f, 0f));
-                m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
-                m.Flt("_HyperFresnelIntensity", 1f);
-                m.Flt("_HyperFresnelSoftGlowIntensity", 3f);
-                m.Flt("_HyperFresnelSparksNoiseIntensity", 0f);
-                m.Flt("_HyperFresnelSecondaryNoiseIntensity", 0f);
-                m.Kw("_ENABLEVORTEX_ON", false);
-            }
+            m.Flt("_GlossPower", 0.9f);
+            m.Flt("_BodyLightingContribution", 0.85f);
             Keep(m, "Mosaic");
             return m;
         }
@@ -419,7 +403,7 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1 slimeMosaicBase: green top, yellow middle, orange bottom (seen through the glass)
+            // SR1 slimeMosaicBase: blue top, green middle, orange-red bottom (seen through the glass)
             var body = MosaicBodyMat(s);
             if (body != null) SetBodyMaterial(app, body);
             var st = ShellStructure(s, app);
