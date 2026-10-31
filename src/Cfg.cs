@@ -14,7 +14,7 @@ namespace ClassicSlimes
         public static MelonPreferences_Entry<float> RadPerSecond;
         public static MelonPreferences_Entry<int> RadDamagePerTick;
         public static MelonPreferences_Entry<bool> RadAuraDamagesPlayer;
-        public static MelonPreferences_Entry<bool> QuantumTeleports;
+        public static MelonPreferences_Entry<bool> QuantumTeleports, QuantumPhaseWalls, QuantumHologram, GlitchTrail;
         public static MelonPreferences_Entry<bool> MosaicGlints;
         public static MelonPreferences_Entry<bool> MosaicGlintFire;
         public static MelonPreferences_Entry<bool> GlitchDisguise;
@@ -46,6 +46,9 @@ namespace ClassicSlimes
             RadDamagePerTick = Cat.CreateEntry("RadDamage", 4, "Damage dealt each time accumulated radiation overflows");
             RadAuraDamagesPlayer = Cat.CreateEntry("RadAuraDamagesPlayer", true, "Rad aura hurts the player");
             QuantumTeleports = Cat.CreateEntry("QuantumTeleports", true, "Quantum slimes create ghosts and teleport");
+            QuantumPhaseWalls = Cat.CreateEntry("QuantumPhaseWalls", true, "Quantum slimes that are not hungry phase through corral walls");
+            QuantumHologram = Cat.CreateEntry("QuantumHologram", true, "Quantum slimes now and then flicker like a hologram (horizontal scanlines)");
+            GlitchTrail = Cat.CreateEntry("GlitchTrail", true, "Glitch slimes leave a trail of pixels behind them");
             MosaicGlints = Cat.CreateEntry("MosaicGlints", true, "Mosaic slimes create glints");
             MosaicGlintFire = Cat.CreateEntry("MosaicGlintFire", true, "Falling glints burst into flames that hurt the player");
             GlitchDisguise = Cat.CreateEntry("GlitchDisguise", true, "Glitch slimes disguise as other slimes");
@@ -57,7 +60,7 @@ namespace ClassicSlimes
             WildFoodShare = Cat.CreateEntry("WildSR1FoodShare", 0.15f, "Share of the wild patch/tree harvest that is an SR1 food (0..0.9)");
             RadHud = Cat.CreateEntry("RadiationMeter", true, "Show the radiation meter (SR1 style) above the health bar while irradiated");
             RadRecoveryPerSecond = Cat.CreateEntry("RadRecoveryPerSecond", 3f, "Radiation that wears off per second once out of a rad aura");
-            RadDomeStyle = Cat.CreateEntry("RadDomeStyle", 0, "Rad aura look: 0 bubble (SR2 style), 1 glass, 2 shadow aura, 3 hyper aura, 4 solar shield, 5 dream bubble, 6 fresnel, 7 bubble (particle shader)");
+            RadDomeStyle = Cat.CreateEntry("RadDomeStyle", 0, "Rad aura look: 0 refracting sphere with a soft green edge (SR1), 1 bubble (SR2 icon style), 2 shadow aura, 3 hyper aura, 4 solar shield, 5 dream bubble, 6 fresnel, 7 bubble (particle shader)");
             GlitchSR1Face = Cat.CreateEntry("GlitchSR1Face", true, "Glitch slimes use the SR1 square-pixel face");
         }
     }

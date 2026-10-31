@@ -36,31 +36,74 @@ namespace ClassicSlimes
 
         // ------------------------------------------------------------------ faces
 
+        /// <summary>Copy of a face material on the glowing variant of its shader (eyeInvoke / mouthInvoke templates).</summary>
+        static Material GlowFaceMat(Material src, bool eyes, string suffix)
+        {
+            var m = Object.Instantiate(src);
+            m.name = src.name + suffix;
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            var tpl = Mat.Find(eyes ? "eyeInvoke" : "mouthInvoke");
+            if (tpl != null && m.shader != tpl.shader)
+            {
+                var atlas = src.HasProperty("_FaceAtlas") ? src.GetTexture("_FaceAtlas") : null;
+                m.shader = tpl.shader;
+                if (atlas != null) m.SetTexture("_FaceAtlas", atlas);
+            }
+            if (tpl != null)
+            {
+                if (tpl.HasProperty("_GlowNoise")) m.Tx("_GlowNoise", tpl.GetTexture("_GlowNoise"));
+                if (tpl.HasProperty("_GlowNoiseSpeed")) m.Flt("_GlowNoiseSpeed", tpl.GetFloat("_GlowNoiseSpeed"));
+            }
+            return m;
+        }
+
         static SlimeFace _radFace;
         static SlimeFace RadFace(SlimeFace src)
         {
             if (_radFace != null || src == null) return _radFace;
-            // SR2-style rad icon: navy eyes with a lime iris, navy smile (plain face shaders, no glow over the face)
+            // SR1 rad: small glowing lime eyes, the open mouth is dark green with a glowing lime / yellow inside
             _radFace = Faces.Clone(src, "faceSlimeRad",
                 e =>
                 {
-                    var m = Object.Instantiate(e); m.name = e.name + "_Rad"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                    m.Col("_EyeRed", new Color(0.09f, 0.12f, 0.21f, 1f));
-                    m.Col("_EyeGreen", new Color(0.66f, 0.90f, 0.28f, 1f));
-                    m.Col("_EyeBlue", new Color(0.95f, 1f, 0.80f, 1f));
+                    var m = GlowFaceMat(e, true, "_Rad");
+                    m.Col("_EyeRed", new Color(0.62f, 1f, 0.16f, 1f));
+                    m.Col("_EyeGreen", new Color(0.86f, 1f, 0.34f, 1f));
+                    m.Col("_EyeBlue", new Color(1f, 1f, 0.85f, 1f));
+                    m.Col("_GlowColor", new Color(0.55f, 1f, 0.12f, 1f));
                     Mats["RadEyes_" + e.name] = m;
                     return m;
                 },
                 mo =>
                 {
-                    var m = Object.Instantiate(mo); m.name = mo.name + "_Rad"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                    m.Col("_MouthTop", new Color(0.09f, 0.12f, 0.21f, 1f));
-                    m.Col("_MouthMid", new Color(0.14f, 0.20f, 0.30f, 1f));
-                    m.Col("_MouthBot", new Color(0.45f, 0.76f, 0.30f, 1f));
+                    var m = GlowFaceMat(mo, false, "_Rad");
+                    m.Col("_MouthTop", new Color(0.02f, 0.20f, 0.05f, 1f));
+                    m.Col("_MouthMid", new Color(0.50f, 0.95f, 0.14f, 1f));
+                    m.Col("_MouthBot", new Color(0.88f, 1f, 0.32f, 1f));
+                    m.Col("_GlowColor", new Color(0.55f, 1f, 0.12f, 1f));
                     Mats["RadMouth_" + mo.name] = m;
                     return m;
                 });
             return _radFace;
+        }
+
+        static SlimeFace _quantumFace;
+        public static SlimeFace QuantumFace(SlimeFace src)
+        {
+            if (_quantumFace != null || src == null) return _quantumFace;
+            // SR1 quantum: glowing yellow eyes (mouth stays stock)
+            _quantumFace = Faces.Clone(src, "faceSlimeQuantum",
+                e =>
+                {
+                    var m = GlowFaceMat(e, true, "_Quantum");
+                    m.Col("_EyeRed", new Color(1f, 0.93f, 0.42f, 1f));
+                    m.Col("_EyeGreen", new Color(1f, 0.97f, 0.55f, 1f));
+                    m.Col("_EyeBlue", new Color(1f, 1f, 0.92f, 1f));
+                    m.Col("_GlowColor", new Color(1f, 0.85f, 0.15f, 1f));
+                    Mats["QuantumEyes_" + e.name] = m;
+                    return m;
+                },
+                null);
+            return _quantumFace;
         }
 
         static SlimeFace _glitchFaceSR1, _glitchFaceSR2;
@@ -125,16 +168,26 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1: SR/AMP/Slime/Body/Rad (self-lit green) -> SR2 phosphor body (phos-core glow) in rad greens
-            var m = BodyMat("Rad", s, "slimePhosphorBase", "slimePinkBase");
+            // SR1: SR/AMP/Slime/Body/Rad (self-lit, very saturated green with a light rim) -> SR2 phosphor body
+            // (phos-core glow) + hyper fresnel rim, both exist together on the hyper-phosphor largo material
+            var m = BodyMat("Rad", s, "HyperDefaultPhosphorDefault_Body", "slimePhosphorBase", "slimePinkBase");
             if (m != null)
             {
-                m.Col("_GlowTop", new Color(0.30f, 1.35f, 0.38f, 1f));
-                m.Flt("_GlowStrength", 0.85f);
+                m.Palette(new Color(0.42f, 1f, 0.36f), new Color(0.10f, 0.88f, 0.18f), new Color(0.03f, 0.55f, 0.09f));
+                m.Col("_GlowTop", new Color(0.35f, 1.6f, 0.30f, 1f));
+                m.Flt("_GlowStrength", 1f);
                 m.Flt("_GlowSpeed", 0.7f);
-                m.Flt("_GlowMin", 0.35f);
+                m.Flt("_GlowMin", 0.45f);
                 m.Flt("_GlowMax", 1f);
-                m.Flt("_GlossPower", 0.55f);
+                m.Flt("_GlossPower", 0.6f);
+                if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
+                {
+                    m.Col("_HyperFresnelColor", new Color(0.70f, 1f, 0.55f, 0f));
+                    m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
+                    m.Flt("_HyperFresnelIntensity", 1.6f);
+                    m.Flt("_HyperFresnelSparksNoiseIntensity", 25f);
+                    m.Flt("_HyperFresnelSecondaryNoiseIntensity", 15f);
+                }
                 SetBodyMaterial(app, m);
             }
             try { var f = RadFace(app._face); if (f != null) app._face = f; }
@@ -149,10 +202,15 @@ namespace ClassicSlimes
         }
 
         /// <summary>Dome looks (index = Cfg RadDomeStyle / DevCmd "dome i").</summary>
-        public static readonly string[] DomeNames = { "bubble", "glass", "shadowAura", "hyperAura", "solarShield", "dreamBubble", "fresnel", "bubbleFx" };
+        public static readonly string[] DomeNames = { "refraction", "bubble", "shadowAura", "hyperAura", "solarShield", "dreamBubble", "fresnel", "bubbleFx" };
         static readonly Material[] _domes = new Material[8];
         public static int DomeStyle = 0;
-        public static bool DomeIsBillboard(int i) => i == 0 || i == 7;
+        public static bool DomeIsBillboard(int i) => i == 1 || i == 7;
+        /// <summary>The SR1 inner glow sphere is only drawn with the SR2-style bubble looks.</summary>
+        public static bool DomeHasCore(int i) => i == 1 || i == 7;
+
+        /// <summary>Plain bright texture for the glass fresnel "reflection": an even soft green edge instead of cloud blotches.</summary>
+        static Texture2D RadRimTex => Gfx.Generated("radRim", 8, 8, (x, y) => new Color(1f, 1f, 1f, 1f), false);
 
         static Texture2D RadBubbleTex => Gfx.BubbleTex("radBubble", new Color(0.30f, 0.80f, 0.32f), new Color(0.62f, 1f, 0.55f), 0.16f, 0.78f, 1.7f, 7, 4242);
 
@@ -163,8 +221,8 @@ namespace ClassicSlimes
             Material m = null;
             switch (i)
             {
-                case 0:   // SR2-icon-like bubble on HDRP Unlit (transparent, alpha blended)
-                    m = Mat.Clone("RadDome0", "DefaultHDParticleMaterial") ?? Mat.CloneByShader("RadDome0", "HDRP/Unlit");
+                case 1:   // SR2-icon-like bubble on HDRP Unlit (transparent, alpha blended)
+                    m = Mat.Clone("RadDome1", "DefaultHDParticleMaterial") ?? Mat.CloneByShader("RadDome1", "HDRP/Unlit");
                     if (m == null) break;
                     m.Tx("_UnlitColorMap", RadBubbleTex);
                     m.Col("_UnlitColor", new Color(1f, 1f, 1f, 1f));
@@ -176,15 +234,30 @@ namespace ClassicSlimes
                     foreach (var p in new[] { "_TintColor", "_Tint", "_Color", "_BaseColor" }) m.Col(p, new Color(1f, 1f, 1f, 1f));
                     m.Flt("_DepthFadeDistance", 0.25f);
                     break;
-                case 1:
-                    m = Mat.Clone("RadDome1", "envLabGlass");
+                case 0:   // SR1 RadAura: one clear sphere that refracts what is behind it, soft green fresnel edge
+                    m = Mat.Clone("RadDome0", "envLabGlass", "SimpleGlass");
                     if (m == null) break;
-                    m.Col("_Color", new Color(0.18f, 0.85f, 0.25f, 0f));
-                    m.Flt("_Opacity", 0.12f);
-                    m.Col("_ReflectionTint", new Color(0.4f, 1f, 0.45f, 0f));
-                    m.Flt("_ReflectionIntensity", 25f);
-                    m.Tx("_NormalMap", GameTex("dptNoiseClouds"));
-                    m.Flt("_DistortionStrength", 8f);
+                    m.Col("_Color", new Color(0.20f, 0.95f, 0.28f, 0f));
+                    m.Flt("_Opacity", 0.10f);
+                    m.Flt("_Smoothness", 0.9f);
+                    m.Flt("_Metallic", 0.2f);
+                    m.Tx("_NormalMap", GameTex("dptNoiseClouds") ?? GameTex("nrm_envGlass01"));
+                    m.Flt("_NormalStrength", 0.35f);
+                    m.Tx("_Reflection", RadRimTex);
+                    m.Flt("_ReflectionIntensity", 6f);
+                    m.Flt("_ReflectionFresnelScale", 1.2f);
+                    m.Flt("_ReflectionFresnelPower", 2.6f);
+                    m.Flt("_ReflectionNormalStrength", 0.1f);
+                    m.Col("_ReflectionTint", new Color(0.30f, 1f, 0.32f, 0f));
+                    m.Flt("_DistortionStrength", 26f);
+                    m.Flt("_DistortionBlur", 0.015f);
+                    m.Flt("_FresnelDistortionBlur", 0.25f);
+                    m.Flt("_BaseMapAlpha", 0f);
+                    m.Flt("_BaseMapColor", 0f);
+                    // one surface only (no inner back side doubling the edge, nothing drawn while standing inside)
+                    m.Kw("_DOUBLESIDED_ON", false);
+                    m.Flt("_DoubleSidedEnable", 0f);
+                    m.Flt("_CullMode", 2f); m.Flt("_CullModeForward", 2f); m.Flt("_TransparentCullMode", 2f);
                     break;
                 case 2:
                     m = Mat.Clone("RadDome2", "ShadowAura") ?? Mat.CloneByShader("RadDome2", "SR/AMP/Particle/ShadowAuraLight");
@@ -226,7 +299,7 @@ namespace ClassicSlimes
         {
             int i = Mathf.Clamp(style < 0 ? DomeStyle : style, 0, _domes.Length - 1);
             var mat = Dome(i);
-            if (mat == null && i != 0) { i = 0; mat = Dome(0); }
+            if (mat == null && i != 1) { i = 1; mat = Dome(1); }
             if (!DomeIsBillboard(i)) return Sphere("RadAura", parent, localPos, diameter, mat);
             var root = new GameObject("RadAura");
             if (parent != null) { root.transform.SetParent(parent, false); root.layer = parent.gameObject.layer; }
@@ -282,36 +355,48 @@ namespace ClassicSlimes
             m.Flt("_BaseMapColor", 0f);
             m.Flt("_DistortionStrength", 2f);
             m.Flt("_ReflectionIntensity", 60f);
-            m.Col("_ReflectionTint", new Color(0.8f, 0.92f, 1f, 0f));
+            m.Col("_ReflectionTint", new Color(0.72f, 0.80f, 1f, 0f));
+            m.Flt("_ReflectionFresnelPower", 2.2f);
             _shell = Keep(m, "MosaicShell");
             return _shell;
         }
 
         /// <summary>
         /// SR1 slimeMosaic_base: msk_mosaic (R/G/B tiles) indexes a rainbow ramp, nrm_mosaic bevels each tile.
-        /// SR2 equivalent: the multi-colour body shader (colour mask + normals) with a vertical rainbow per channel,
-        /// blue/teal at the top, green/yellow in the middle, orange at the bottom; black mask = bright grout.
-        /// The template already uses exactly the keyword set we need (alpha test + multi colour + normals).
+        /// SR1 look: green / yellow-green at the top, yellow in the middle, orange at the bottom, a few blue / purple
+        /// tiles, bright glassy seams and an iridescent blue-violet rim. SR2 equivalent: the multi-colour body shader
+        /// (colour mask + normals) with a vertical gradient per channel; black mask = the glass seams; the hyper
+        /// fresnel (on the flutter "hyper normal" material that has multi colour + normals + hyper) draws the rim.
         /// </summary>
         static Material MosaicBodyMat(SlimeSpec s)
         {
-            var m = Mat.Clone("MosaicBody", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
+            var m = Mat.Clone("MosaicBody", "slimeFlutterWingFlutterNormalHyperNormal", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
             if (m == null) return null;
-            // SR1 mosaic: deep blue glass with green / orange / yellow / sky-blue tiles. SR2's body gradient mostly blends
-            // middle and bottom, so the blue base is kept on all three stops and the tile groups shift colour downwards.
-            m.Palette(new Color(0.15f, 0.40f, 1f), new Color(0.12f, 0.32f, 0.95f), new Color(0.10f, 0.28f, 0.85f));
+            m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
+            // seams: pale glassy blue-lavender
+            m.Palette(new Color(0.62f, 0.66f, 1f), new Color(0.80f, 0.88f, 1f), new Color(0.92f, 0.86f, 1f));
             m.Tx("_ColorMask", Res.Tex("msk_mosaic", true));
             m.Flt("_ColorMaskUV1", 0f);
-            m.Col("_RedTopColor", new Color(0.45f, 0.80f, 1f)); m.Col("_RedMiddleColor", new Color(0.35f, 0.90f, 0.30f)); m.Col("_RedBottomColor", new Color(1f, 0.50f, 0.10f));
-            m.Col("_GreenTopColor", new Color(0.20f, 0.50f, 1f)); m.Col("_GreenMiddleColor", new Color(0.30f, 0.75f, 1f)); m.Col("_GreenBottomColor", new Color(0.40f, 0.90f, 0.30f));
-            m.Col("_BlueTopColor", new Color(1f, 0.85f, 0.20f)); m.Col("_BlueMiddleColor", new Color(1f, 0.65f, 0.15f)); m.Col("_BlueBottomColor", new Color(1f, 0.40f, 0.10f));
+            m.Col("_RedTopColor", new Color(0.36f, 0.86f, 0.22f)); m.Col("_RedMiddleColor", new Color(0.80f, 0.93f, 0.16f)); m.Col("_RedBottomColor", new Color(1f, 0.55f, 0.10f));
+            m.Col("_GreenTopColor", new Color(0.58f, 0.93f, 0.28f)); m.Col("_GreenMiddleColor", new Color(1f, 0.86f, 0.14f)); m.Col("_GreenBottomColor", new Color(1f, 0.38f, 0.10f));
+            m.Col("_BlueTopColor", new Color(0.38f, 0.42f, 1f)); m.Col("_BlueMiddleColor", new Color(0.62f, 0.45f, 1f)); m.Col("_BlueBottomColor", new Color(1f, 0.72f, 0.18f));
             m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
+            m.Kw("_ENABLENORMALS_ON", true); m.Flt("_EnableNormals", 1f);
             m.Tx("_Normal", Res.Tex("nrm_mosaic", true));
             m.Flt("_NormalUV1", 0f);
             m.Flt("_NormalSmoothTop", 0f);
             m.Flt("_NormalPanX", 0f); m.Flt("_NormalPanY", 0f);
-            m.Flt("_GlossPower", 0.9f);
-            m.Flt("_BodyLightingContribution", 0.85f);
+            m.Flt("_GlossPower", 0.95f);
+            m.Flt("_BodyLightingContribution", 0.8f);
+            if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
+            {
+                m.Flt("_EnableHyperEffect", 1f);
+                m.Col("_HyperFresnelColor", new Color(0.42f, 0.36f, 1f, 0f));
+                m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
+                m.Flt("_HyperFresnelIntensity", 1.8f);
+                m.Flt("_HyperFresnelSparksNoiseIntensity", 10f);
+                m.Flt("_HyperFresnelSecondaryNoiseIntensity", 10f);
+            }
             Keep(m, "Mosaic");
             return m;
         }
@@ -334,7 +419,7 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1 slimeMosaicBase: blue top, green middle, orange-red bottom (seen through the glass)
+            // SR1 slimeMosaicBase: green top, yellow middle, orange bottom (seen through the glass)
             var body = MosaicBodyMat(s);
             if (body != null) SetBodyMaterial(app, body);
             var st = ShellStructure(s, app);

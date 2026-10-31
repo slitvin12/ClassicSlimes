@@ -50,7 +50,7 @@ namespace ClassicSlimes
             Add(new SlimeSpec
             {
                 Name = "Rad", Key = "rad",
-                Top = C(0.44f, 0.90f, 0.48f), Mid = C(0.27f, 0.62f, 0.31f), Bot = C(0.13f, 0.36f, 0.16f), Ammo = C(0.129f, 0.792f, 0.149f),   // SR2-style rad icon
+                Top = C(0.42f, 1f, 0.36f), Mid = C(0.10f, 0.88f, 0.18f), Bot = C(0.03f, 0.55f, 0.09f), Ammo = C(0.129f, 0.792f, 0.149f),   // saturated SR1 rad green
                 Largo = true,
                 FoodGroups = new[] { Library.veggies },
                 FavoriteHints = new[] { "OcaOca", "Ocaoca", "Oca", "Beet" },
@@ -223,6 +223,28 @@ namespace ClassicSlimes
 
             try { s.Customize?.Invoke(s); }
             catch (Exception e) { ClassicSlimesMod.Log.Error($"Customize {s.Name} failed: {e}"); }
+
+            // Cotton's SetPalette read the colours from the (still pink) cloned body material -> vac/HUD tinted pink.
+            try
+            {
+                var pal = app._colorPalette;
+                pal.Top = s.Top; pal.Middle = s.Mid; pal.Bottom = s.Bot; pal.Ammo = s.Ammo;
+                app._colorPalette = pal;
+                app.ColorPaletteNew = pal;
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning($"Palette {s.Name}: {e.Message}"); }
+            try
+            {
+                string fa(UnityEngine.AddressableAssets.AssetReference r) => r == null ? "null" : (r.AssetGUID ?? "?");
+                ClassicSlimesMod.Log.Msg($"  {s.Name} fullArt def={fa(def._fullArt)} app={fa(app._fullArt)} requires={def.RequiresFullArt}/{app.RequiresFullArt}");
+            }
+            catch { }
+            try
+            {
+                var art = Res.Bytes("pediaSlime" + s.Name + ".png") != null ? Res.Sprite("pediaSlime" + s.Name) : icon;
+                PediaArt.Register(def, art);
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning($"Pedia art {s.Name}: {e.Message}"); }
 
             try
             {

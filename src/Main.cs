@@ -73,6 +73,7 @@ namespace ClassicSlimes
         {
             try { Mat.Tick(); } catch (Exception e) { Log.Warning("Mat.Tick: " + e.Message); }
             RadHud.Tick();
+            try { PediaArt.Tick(); } catch { }
             if (Diag.Enabled) DevCmd.Tick();
         }
 

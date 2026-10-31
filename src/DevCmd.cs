@@ -134,6 +134,22 @@ namespace ClassicSlimes
                 case "rad":
                     SceneContext.Instance.PlayerState.AddRads(F(a, 1, 50f));
                     break;
+                case "pedia": Pedia(a.Length > 1 ? a[1] : "Rad"); break;
+                case "palette": Palettes(); break;
+                case "phase":
+                    {
+                        var cam = Camera.main; var q = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
+                        if (q != null) q.GetComponent<QuantumSlime>().StartPhase(F(a, 1, 1f)); else L("no quantum slime");
+                        break;
+                    }
+                case "walls":
+                    {
+                        var cam = Camera.main; var q = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
+                        var qs = q != null ? q.GetComponent<QuantumSlime>() : null;
+                        L($"walls={QuantumSlime.WallCount} nearest quantum: " + (qs == null ? "none" :
+                            $"phasing={qs.Phasing} hunger={U.Hunger(q.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeEmotions>()):0.00} dist={(q.transform.position - cam.transform.position).magnitude:0.0}"));
+                        break;
+                    }
                 default: ClassicSlimesMod.Log.Warning("[cmd] unknown: " + l); break;
             }
         }
@@ -198,6 +214,34 @@ namespace ClassicSlimes
         }
 
         static void L(string m) => ClassicSlimesMod.Log.Msg("[cmd] " + m);
+
+        static void Pedia(string name)
+        {
+            var spec = SlimeFactory.Spec(name);
+            if (spec?.Def == null) { L("no slime " + name); return; }
+            var pd = SceneContext.Instance?.PediaDirector;
+            if (pd == null) { L("no PediaDirector"); return; }
+            var e = pd.GetEntry(spec.Def);
+            if (e == null) { L("no pedia entry for " + name); return; }
+            pd.Unlock(e, false);
+            pd.ShowPedia(e, Il2CppMonomiPark.SlimeRancher.Analytics.Event.PediaOpenedAnalyticsEvent.Opener.DEBUG_MENU, null);
+            L($"pedia {name}: entry={e.name} art={(PediaArt.For(e) != null ? "ours" : "none")}");
+        }
+
+        static void Palettes()
+        {
+            string c(Color x) => $"({x.r:0.00},{x.g:0.00},{x.b:0.00})";
+            foreach (var s in SlimeFactory.Specs)
+            {
+                if (s.Def?.AppearancesDefault == null) continue;
+                foreach (var app in s.Def.AppearancesDefault)
+                {
+                    if (app == null) continue;
+                    var p = app._colorPalette; var n = app.ColorPaletteNew;
+                    L($"palette {s.Name}/{app.name}: T{c(p.Top)} M{c(p.Middle)} B{c(p.Bottom)} A{c(p.Ammo)} new T{c(n.Top)} A{c(n.Ammo)} splat{c(app._splatColor)}");
+                }
+            }
+        }
 
         static string ShInfo(Material m)
         {

@@ -173,17 +173,41 @@ namespace ClassicSlimes
         }
 
         // ------------------------------------------------------------------ Quantum
+        /// <summary>
+        /// SR1 quantum: warm yellow body with lighter swirl ("@") marks and yellow eyes. SR2: the multi-colour body shader
+        /// with a generated swirl mask (red channel = swirls) on the hyper material for a pale holographic rim.
+        /// </summary>
         public static void Quantum(SlimeSpec s)
         {
             ClearRadiant(s.Def);
-            var m = BodyMat("Quantum", s, "slimeTwinBase", "slimePinkBase");
+            var app = App(s);
+            var m = BodyMat("Quantum", s, "HyperDefaultRingtailDefault_Body", "slimeRingtailBase", "slimeTwinBase", "slimePinkBase");
             if (m != null)
             {
-                m.Col("_TwinTopColor", new Color(1f, 0.95f, 0.45f, 1f));
-                m.Col("_TwinMiddleColor", new Color(1f, 0.62f, 0.05f, 1f));
-                m.Col("_TwinBottomColor", new Color(0.85f, 0.35f, 0.05f, 1f));
-                SetBodyMaterial(App(s), m);
+                m.Palette(new Color(1f, 0.86f, 0.30f), new Color(1f, 0.70f, 0.12f), new Color(0.93f, 0.50f, 0.07f));
+                m.Kw("_ENABLETWINEFFECT_ON", false); m.Flt("_EnableTwinEffect", 0f);
+                m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
+                m.Tx("_ColorMask", Gfx.SwirlMask);
+                m.Flt("_ColorMaskUV1", 0f);
+                m.Col("_RedTopColor", new Color(1f, 0.98f, 0.72f)); m.Col("_RedMiddleColor", new Color(1f, 0.93f, 0.58f)); m.Col("_RedBottomColor", new Color(1f, 0.82f, 0.45f));
+                m.Col("_GreenTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_GreenMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_GreenBottomColor", new Color(1f, 0.65f, 0.25f));
+                m.Col("_BlueTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_BlueMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_BlueBottomColor", new Color(1f, 0.65f, 0.25f));
+                m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
+                if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
+                {
+                    m.Flt("_EnableHyperEffect", 1f);
+                    m.Col("_HyperFresnelColor", new Color(1f, 0.95f, 0.55f, 0f));
+                    m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
+                    m.Flt("_HyperFresnelIntensity", 1.4f);
+                    m.Flt("_HyperFresnelSparksNoiseIntensity", 20f);
+                    m.Flt("_HyperFresnelSecondaryNoiseIntensity", 10f);
+                }
+                m.Flt("_GlossPower", 0.6f);
+                Keep(m, "Quantum");
+                SetBodyMaterial(app, m);
             }
+            try { var f = QuantumFace(app._face); if (f != null) app._face = f; }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("Quantum face: " + e.Message); }
             Behaviours.Add<QuantumSlime>(s.Def);
         }
 
@@ -214,6 +238,38 @@ namespace ClassicSlimes
                 }
                 return _ghost;
             }
+        }
+
+        static Material _holo;
+        /// <summary>
+        /// Quantum "phase" blink: a transparent unlit shell with scrolling horizontal scanlines (hologram look).
+        /// The texture is scrolled vertically by QuantumSlime while a phase is running.
+        /// </summary>
+        public static Material HoloMat
+        {
+            get
+            {
+                if (_holo != null) return _holo;
+                var m = Mat.Clone("QuantumHolo", "DefaultHDParticleMaterial") ?? Mat.CloneByShader("QuantumHolo", "HDRP/Unlit");
+                if (m == null) return null;
+                m.Tx("_UnlitColorMap", Gfx.ScanlineTex);
+                m.Col("_UnlitColor", new Color(1f, 0.93f, 0.55f, 0.85f));
+                _holo = Keep(m, "QuantumHolo");
+                return _holo;
+            }
+        }
+
+        /// <summary>Scanline shell around a quantum slime (hidden until a phase starts).</summary>
+        public static GameObject MakeHolo(Transform parent)
+        {
+            var mat = HoloMat;
+            if (mat == null || parent == null) return null;
+            var go = Gfx.MeshObj("QuantumHolo", parent, Gfx.SphereMesh, mat, new Vector3(0f, 0.5f, 0f), 1f);
+            go.transform.localScale = new Vector3(1.12f, 1.02f, 1.12f);
+            var r = go.GetComponent<Renderer>();
+            if (r != null) r.shadowCastingMode = ShadowCastingMode.Off;
+            go.SetActive(false);
+            return go;
         }
 
         static Mesh _ghostMesh;

@@ -480,6 +480,11 @@ namespace ClassicSlimes
             try { return e != null ? e.Get(SlimeEmotions.Emotion.AGITATION) : 0f; } catch { return 0f; }
         }
 
+        public static float Hunger(SlimeEmotions e)
+        {
+            try { return e != null ? e.Get(SlimeEmotions.Emotion.HUNGER) : 1f; } catch { return 1f; }
+        }
+
         public static bool IsDay()
         {
             try { var h = SceneContext.Instance.TimeDirector.CurrHour(); return h >= 6f && h < 18.5f; } catch { return true; }

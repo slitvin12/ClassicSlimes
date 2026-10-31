@@ -78,7 +78,9 @@ namespace ClassicSlimes
             {
                 if (r == null) continue;
                 if (r._aura != null) Destroy(r._aura);
+                if (r._core != null) Destroy(r._core);
                 r._aura = Visuals.MakeDome(r.transform, new Vector3(0f, 0.5f, 0f), AuraScale);
+                r._core = r.MakeCore();
             }
         }
         const float ExpandFactor = 1.5f, ExpandingTime = 3f, ExpandedTime = 10f, CalmingTime = 0.2f;
@@ -97,13 +99,18 @@ namespace ClassicSlimes
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
             _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale);
-            _core = Visuals.Sphere("RadCore", transform, new Vector3(0f, 0.5f, 0f), AuraScale * CoreRatio, Visuals.RadCoreMat);
+            _core = MakeCore();
             All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.RadAura);
             _nextExpand = Time.time + Delay();
         }
 
         float Delay() => Mathf.Lerp(30f, 180f, 1f - U.Agitation(_emo));
+
+        /// <summary>SR1 inner glow sphere: only with the SR2-style bubble looks (the SR1 refracting aura is one sphere).</summary>
+        GameObject MakeCore() => Visuals.DomeHasCore(Visuals.DomeStyle)
+            ? Visuals.Sphere("RadCore", transform, new Vector3(0f, 0.5f, 0f), AuraScale * CoreRatio, Visuals.RadCoreMat)
+            : null;
 
         void Update()
         {
@@ -177,6 +184,8 @@ namespace ClassicSlimes
 
         void Update()
         {
+            try { UpdatePhase(); } catch (Exception e) { if (!_phaseErr) { _phaseErr = true; ClassicSlimesMod.Log.Warning("Quantum phase: " + e.Message); } }
+            try { UpdateWalls(); } catch (Exception e) { if (!_wallErr) { _wallErr = true; ClassicSlimesMod.Log.Warning("Quantum walls: " + e.Message); } }
             _ghosts.RemoveAll(g => g == null);
             if (!Cfg.QuantumTeleports.Value) { if (_ghosts.Count > 0) ClearGhosts(false); return; }
             bool held = _vac != null && _vac.IsHeld();
@@ -199,6 +208,153 @@ namespace ClassicSlimes
                 _nextTeleport = Time.time + TeleportDelay();
                 if (U.Agitation(_emo) > 0.1f && _ghosts.Count > 0) TeleportTo(_ghosts[U.Rng.Next(_ghosts.Count)]);
             }
+        }
+
+        // ------------------------------------------------------------- hologram "phase" blink
+        // SR1 quantum shader: the slime now and then drops out of phase - the body flickers away and only horizontal
+        // hologram scanlines are left for a moment.
+        GameObject _holo;
+        readonly List<Renderer> _hidden = new();
+        float _nextPhase, _phaseEnd, _nextFlick;
+        bool _bodyOff, _phaseErr, _wallErr;
+
+        float PhaseDelay() => Mathf.Lerp(14f, 4f, U.Agitation(_emo)) * U.Rand(0.7f, 1.3f);
+
+        void UpdatePhase()
+        {
+            float now = Time.time;
+            bool held = _vac != null && _vac.IsHeld();
+            if (_phaseEnd > 0f)
+            {
+                if (now >= _phaseEnd || held || !Cfg.QuantumHologram.Value) { EndPhase(); return; }
+                if (now >= _nextFlick)
+                {
+                    _nextFlick = now + (_bodyOff ? U.Rand(0.05f, 0.12f) : U.Rand(0.03f, 0.07f));
+                    SetBodyOff(!_bodyOff);
+                }
+                var mat = Visuals.HoloMat;
+                if (mat != null) mat.SetTextureOffset("_UnlitColorMap", new Vector2(0f, -now * 1.7f));
+                return;
+            }
+            if (_nextPhase <= 0f) _nextPhase = now + U.Rand(3f, 10f);
+            if (held || !Cfg.QuantumHologram.Value || now < _nextPhase) return;
+            StartPhase(U.Rand(0.45f, 0.85f));
+        }
+
+        public void StartPhase(float seconds)
+        {
+            if (_phaseEnd > 0f) { _phaseEnd = Mathf.Max(_phaseEnd, Time.time + seconds); return; }
+            _phaseEnd = Time.time + seconds;
+            _nextFlick = Time.time + 0.04f;
+            _nextPhase = _phaseEnd + PhaseDelay();
+            if (_holo == null)
+            {
+                _holo = Visuals.MakeHolo(transform);
+                var mat = Visuals.HoloMat;
+                if (mat != null) mat.SetTextureScale("_UnlitColorMap", new Vector2(1f, 2.5f));
+            }
+            if (_holo != null) _holo.SetActive(true);
+            _hidden.Clear();
+            foreach (var r in GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || !r.enabled || r.TryCast<ParticleSystemRenderer>() != null) continue;
+                if (_holo != null && r.transform.IsChildOf(_holo.transform)) continue;
+                if (r.GetComponentInParent<RadSlime>() != null && r.name.StartsWith("Rad")) continue;   // largo auras
+                _hidden.Add(r);
+            }
+            SetBodyOff(true);
+        }
+
+        void SetBodyOff(bool off)
+        {
+            _bodyOff = off;
+            foreach (var r in _hidden) if (r != null) r.enabled = !off;
+        }
+
+        void EndPhase()
+        {
+            _phaseEnd = 0f;
+            SetBodyOff(false);
+            _hidden.Clear();
+            if (_holo != null) _holo.SetActive(false);
+        }
+
+        // ------------------------------------------------------------- phasing through corral walls
+        // Not hungry -> the slime is "elsewhere" enough to drift through corral walls (collisions with every wall
+        // collider of every corral (WallUpgrader standard + upgrade walls) are ignored). Hungry again -> solid again,
+        // but only once it is not stuck inside a wall.
+        static readonly List<Collider> Walls = new();
+        static readonly HashSet<IntPtr> WallSet = new();
+        static float _wallsAt = -999f;
+        readonly List<Collider> _ignored = new();
+        readonly HashSet<IntPtr> _ignoredSet = new();
+        Collider[] _cols;
+        float _nextWallCheck;
+        public bool Phasing => _ignored.Count > 0;
+
+        static void RefreshWalls()
+        {
+            if (Time.time - _wallsAt < 10f) return;
+            _wallsAt = Time.time;
+            Walls.Clear(); WallSet.Clear();
+            foreach (var w in Object.FindObjectsOfType<WallUpgrader>())
+            {
+                if (w == null) continue;
+                foreach (var root in new[] { w.StandardWalls, w.UpgradeWalls })
+                {
+                    if (root == null) continue;
+                    foreach (var c in root.GetComponentsInChildren<Collider>(true))
+                        if (c != null && !c.isTrigger && WallSet.Add(c.Pointer)) Walls.Add(c);
+                }
+            }
+        }
+
+        public static int WallCount { get { RefreshWalls(); return Walls.Count; } }
+
+        bool InsideIgnoredWall()
+        {
+            float r = 0.45f * transform.lossyScale.x;
+            foreach (var c in Physics.OverlapSphere(transform.position + Vector3.up * r, r, ~0, QueryTriggerInteraction.Ignore))
+                if (c != null && _ignoredSet.Contains(c.Pointer)) return true;
+            return false;
+        }
+
+        void UpdateWalls()
+        {
+            if (Time.time < _nextWallCheck) return;
+            _nextWallCheck = Time.time + 0.3f;
+            bool held = _vac != null && _vac.IsHeld();
+            bool want = Cfg.QuantumPhaseWalls.Value && !held && U.Hunger(_emo) < 0.5f;
+            if (want)
+            {
+                RefreshWalls();
+                if (_cols == null)
+                {
+                    var l = new List<Collider>();
+                    foreach (var c in GetComponentsInChildren<Collider>()) if (c != null && !c.isTrigger) l.Add(c);
+                    _cols = l.ToArray();
+                }
+                var pos = transform.position;
+                foreach (var w in Walls)
+                {
+                    if (w == null || _ignoredSet.Contains(w.Pointer)) continue;
+                    if (w.bounds.SqrDistance(pos) > 400f) continue;
+                    foreach (var c in _cols) if (c != null) Physics.IgnoreCollision(c, w, true);
+                    _ignored.Add(w); _ignoredSet.Add(w.Pointer);
+                }
+                if (_ignored.Count > 0 && _phaseEnd <= 0f && Cfg.QuantumHologram.Value && InsideIgnoredWall()) StartPhase(0.6f);
+                return;
+            }
+            if (_ignored.Count == 0 || InsideIgnoredWall()) return;
+            RestoreWalls();
+        }
+
+        void RestoreWalls()
+        {
+            if (_cols != null)
+                foreach (var w in _ignored)
+                    if (w != null) foreach (var c in _cols) if (c != null) Physics.IgnoreCollision(c, w, false);
+            _ignored.Clear(); _ignoredSet.Clear();
         }
 
         public void SpawnGhost(Vector3 p)
@@ -235,6 +391,7 @@ namespace ClassicSlimes
         {
             foreach (var g in _ghosts) if (g != null) Object.Destroy(g.gameObject);
             _ghosts.Clear();
+            try { RestoreWalls(); } catch { }
         }
     }
 
@@ -581,7 +738,7 @@ namespace ClassicSlimes
         bool _disguised, _debugged;
         float _nextDisguise, _disguiseUntil, _nextFlicker, _flickerEnd, _heldTime;
 
-        ParticleSystem _pixels;
+        ParticleSystem _pixels, _trail;
         static int _maskFrame = -1;
         static float _nextMask;
 
@@ -602,6 +759,9 @@ namespace ClassicSlimes
         {
             All.Add(this);
             _pixels = Gfx.Sparkles("GlitchPixels", transform, new Vector3(0f, 0.7f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.45f, 0.8f, 1f), 3.5f, 1.1f, 0.06f, 0.13f, 0.75f, 12, 0.15f);
+            // SR1 glitch: a trail of pixel squares left behind while it moves (world space, emitted per metre)
+            if (Cfg.GlitchTrail.Value)
+                _trail = Gfx.Trail("GlitchTrail", transform, new Vector3(0f, 0.3f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.42f, 0.78f, 1f), 7f, 1.2f, 0.07f, 0.16f, 0.4f, 60);
             _app = GetComponent<SlimeAppearanceApplicator>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
@@ -633,6 +793,7 @@ namespace ClassicSlimes
             if (_app == null || _own == null) return;
             bool held = _vac != null && _vac.IsHeld();
             Gfx.SetEmitting(_pixels, !held && !_disguised);
+            Gfx.SetEmitting(_trail, !held && !_disguised);
             if (held)
             {
                 if (_disguised) Reveal(true);
