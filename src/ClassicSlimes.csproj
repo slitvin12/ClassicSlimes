@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>ClassicSlimes</AssemblyName>
+    <RootNamespace>ClassicSlimes</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <SR2Dir Condition="'$(SR2Dir)'==''">D:\SteamLibrary\steamapps\common\Slime Rancher 2</SR2Dir>
+    <NoWarn>CS0618;CS8632;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(SR2Dir)\MelonLoader\net6\MelonLoader.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\MelonLoader\net6\0Harmony.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\MelonLoader\net6\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\MelonLoader\net6\Il2CppInterop.Common.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\MelonLoader\net6\UnityEngine.Il2CppImageConversionManager.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\Mods\CottonLibrary.dll" Private="false" />
+    <Reference Include="$(SR2Dir)\MelonLoader\Il2CppAssemblies\*.dll" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\**\*" LogicalName="ClassicSlimes.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="Deploy" AfterTargets="Build" Condition="'$(Deploy)'=='true'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SR2Dir)\Mods" />
+  </Target>
+</Project>

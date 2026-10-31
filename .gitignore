@@ -1,0 +1,36 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+.idea/
+
+# Decompiled game / third-party code and raw SR1 extraction (copyrighted, never commit)
+decomp/
+extract/
+*.log
+
+# Local dev tooling: only the reusable scripts below are tracked
+tools/*
+!tools/env.cmd
+!tools/inventory.py
+!tools/sr1lib.py
+!tools/export_assets.py
+!tools/text_extract.py
+!tools/gen_loc.py
+!tools/prepare_assets.py
+!tools/prep_tex.py
+!tools/relaunch.py
+!tools/shots.py
+!tools/crop.py
+!tools/ln.py
+!tools/crashloop.py
+!tools/sym.py
+
+# Misc
+__pycache__/
+*.pyc
+*.jpg
+!src/Assets/**/*.jpg
+Thumbs.db
+.DS_Store
