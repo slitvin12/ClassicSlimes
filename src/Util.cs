@@ -91,11 +91,117 @@ namespace ClassicSlimes
             return _cache.TryGetValue(name, out var r) && r != null ? r : null;
         }
 
+        static bool Healthy(Shader sh) => sh != null && sh.isSupported && !sh.name.StartsWith("Hidden/InternalError");
+
         static void Index()
         {
             _cache = new Dictionary<string, Material>();
             foreach (var m in Resources.FindObjectsOfTypeAll<Material>())
-                if (m != null && !m.name.StartsWith("ClassicSlimes") && !_cache.ContainsKey(m.name)) _cache[m.name] = m;
+            {
+                if (m == null || m.name.StartsWith("ClassicSlimes")) continue;
+                // prefer a copy whose shader is alive (asset bundles may hold dead duplicates)
+                if (!_cache.TryGetValue(m.name, out var have) || (!Healthy(have.shader) && Healthy(m.shader))) _cache[m.name] = m;
+            }
+        }
+
+        // ---------------------------------------------------------------- keeper
+        // Our materials are cloned from SR2 assets that can live in Addressables bundles. When such a bundle is
+        // unloaded (scene change) the shader / texture objects it owned are destroyed and every clone that
+        // references them renders as the magenta error shader. The keeper snapshots each clone while it is healthy
+        // and re-binds a live shader / texture with the same name when the original dies.
+        sealed class Snap { public string Shader; public string[] Kw; public readonly Dictionary<string, string> Tex = new(); }
+        static readonly List<Material> _made = new();
+        static readonly HashSet<IntPtr> _madeSet = new();
+        static readonly Dictionary<IntPtr, Snap> _snaps = new();
+        static readonly Dictionary<IntPtr, string> _names = new();
+        public static int Destroyed;
+        static float _nextCheck;
+        public static int Revived;
+
+        public static Material Track(Material m)
+        {
+            if (m != null && _madeSet.Add(m.Pointer)) { _made.Add(m); _names[m.Pointer] = m.name; }
+            return m;
+        }
+
+        public static IEnumerable<Material> Made => _made;
+        public static bool IsMade(Material m) => m != null && _madeSet.Contains(m.Pointer);
+
+        static Snap Snapshot(Material m)
+        {
+            var s = new Snap { Shader = m.shader.name };
+            var kw = m.shaderKeywords;
+            if (kw != null) { s.Kw = new string[kw.Length]; for (int i = 0; i < kw.Length; i++) s.Kw[i] = kw[i]; }
+            try
+            {
+                foreach (var p in m.GetTexturePropertyNames())
+                {
+                    var t = m.GetTexture(p);
+                    if (t != null && !string.IsNullOrEmpty(t.name)) s.Tex[p] = t.name;
+                }
+            }
+            catch { }
+            return s;
+        }
+
+        static Dictionary<string, Shader> LiveShaders()
+        {
+            var d = new Dictionary<string, Shader>();
+            foreach (var sh in Resources.FindObjectsOfTypeAll<Shader>())
+                if (Healthy(sh) && !d.ContainsKey(sh.name)) d[sh.name] = sh;
+            return d;
+        }
+
+        static Dictionary<string, Texture> LiveTextures()
+        {
+            var d = new Dictionary<string, Texture>();
+            foreach (var t in Resources.FindObjectsOfTypeAll<Texture>())
+                if (t != null && !string.IsNullOrEmpty(t.name) && !d.ContainsKey(t.name)) d[t.name] = t;
+            return d;
+        }
+
+        /// <summary>Called every frame; checks all tracked materials every 2 s.</summary>
+        public static void Tick(bool force = false)
+        {
+            if (!force && Time.unscaledTime < _nextCheck) return;
+            _nextCheck = Time.unscaledTime + 2f;
+            Dictionary<string, Shader> shaders = null;
+            Dictionary<string, Texture> texes = null;
+            for (int i = _made.Count - 1; i >= 0; i--)
+            {
+                var m = _made[i];
+                if (m == null)
+                {
+                    _made.RemoveAt(i); Destroyed++;
+                    _names.TryGetValue(m.Pointer, out var dn);
+                    ClassicSlimesMod.Log.Warning($"[mat] tracked material destroyed by the game: {dn} (t={Time.time:F1})");
+                    continue;
+                }
+                _snaps.TryGetValue(m.Pointer, out var s);
+                var sh = m.shader;
+                if (Healthy(sh))
+                {
+                    if (s == null) { _snaps[m.Pointer] = Snapshot(m); continue; }
+                    if (s.Shader != sh.name) { _snaps[m.Pointer] = Snapshot(m); continue; } // changed on purpose
+                    foreach (var kv in s.Tex)
+                    {
+                        if (m.GetTexture(kv.Key) != null) continue;
+                        texes ??= LiveTextures();
+                        if (texes.TryGetValue(kv.Value, out var nt)) { m.SetTexture(kv.Key, nt); Revived++; ClassicSlimesMod.Log.Msg($"[mat] re-bound texture {kv.Value} on {m.name}.{kv.Key}"); }
+                    }
+                    continue;
+                }
+                if (s == null) continue;
+                shaders ??= LiveShaders();
+                if (shaders.TryGetValue(s.Shader, out var ns))
+                {
+                    m.shader = ns;
+                    if (s.Kw != null) m.shaderKeywords = s.Kw;
+                    Revived++;
+                    ClassicSlimesMod.Log.Msg($"[mat] re-bound shader {s.Shader} on {m.name}");
+                }
+            }
+            try { Faces.Tick(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("[faces] tick: " + e.Message); }
         }
 
         public static Material Clone(string newName, params string[] templates)
@@ -107,9 +213,24 @@ namespace ClassicSlimes
                 var m = new Material(src);
                 m.name = "ClassicSlimes_" + newName;
                 m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                return m;
+                return Track(m);
             }
             ClassicSlimesMod.Log.Warning($"No template material for {newName} ({string.Join(",", templates)})");
+            return null;
+        }
+
+        /// <summary>Copy of the first loaded material that uses the given shader.</summary>
+        public static Material CloneByShader(string newName, string shaderName)
+        {
+            foreach (var src in Resources.FindObjectsOfTypeAll<Material>())
+            {
+                if (src == null || src.name.StartsWith("ClassicSlimes")) continue;
+                var sh = src.shader;
+                if (!Healthy(sh) || sh.name != shaderName) continue;
+                var m = new Material(src) { name = "ClassicSlimes_" + newName, hideFlags = HideFlags.DontUnloadUnusedAsset };
+                return Track(m);
+            }
+            ClassicSlimesMod.Log.Warning($"No material with shader {shaderName} for {newName}");
             return null;
         }
 
@@ -159,6 +280,28 @@ namespace ClassicSlimes
         {
             if (_fx == null || !_fx.TryGetValue(name, out var g) || g == null) Index();
             return _fx.TryGetValue(name, out var r) && r != null ? r : null;
+        }
+
+        static readonly Dictionary<string, GameObject> _kept = new();
+        static GameObject _keepRoot;
+
+        /// <summary>A private, inactive copy of an FX prefab that survives the unloading of the bundle it came from.</summary>
+        public static GameObject Kept(string name)
+        {
+            if (_kept.TryGetValue(name, out var k) && k != null) return k;
+            var src = Get(name);
+            if (src == null) return null;
+            if (_keepRoot == null)
+            {
+                _keepRoot = new GameObject("ClassicSlimesFxKeep");
+                _keepRoot.SetActive(false);
+                Object.DontDestroyOnLoad(_keepRoot);
+                _keepRoot.hideFlags = HideFlags.HideAndDontSave;
+            }
+            k = Object.Instantiate(src, _keepRoot.transform);
+            k.name = name;
+            _kept[name] = k;
+            return k;
         }
 
         static void Index()

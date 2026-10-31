@@ -15,6 +15,8 @@ namespace ClassicSlimes
     {
         public static void Register()
         {
+            ClassInjector.RegisterTypeInIl2Cpp<Billboard>();
+            ClassInjector.RegisterTypeInIl2Cpp<SphereBillboard>();
             ClassInjector.RegisterTypeInIl2Cpp<RadSlime>();
             ClassInjector.RegisterTypeInIl2Cpp<QuantumGhost>();
             ClassInjector.RegisterTypeInIl2Cpp<QuantumSlime>();
@@ -64,6 +66,21 @@ namespace ClassicSlimes
         public RadSlime(IntPtr ptr) : base(ptr) { }
 
         const float AuraScale = 3.2f;          // SR1 RadAura transform scale (unit sphere)
+        const float CoreRatio = 0.62f;
+        public static readonly List<RadSlime> All = new();
+
+        void OnDestroy() => All.Remove(this);
+
+        /// <summary>Dev: switch the dome look of every live rad slime.</summary>
+        public static void RestyleAll()
+        {
+            foreach (var r in All)
+            {
+                if (r == null) continue;
+                if (r._aura != null) Destroy(r._aura);
+                r._aura = Visuals.MakeDome(r.transform, new Vector3(0f, 0.5f, 0f), AuraScale);
+            }
+        }
         const float ExpandFactor = 1.5f, ExpandingTime = 3f, ExpandedTime = 10f, CalmingTime = 0.2f;
 
         GameObject _aura, _core;
@@ -79,8 +96,9 @@ namespace ClassicSlimes
             _emo = GetComponent<SlimeEmotions>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
-            _aura = Visuals.Sphere("RadAura", transform, new Vector3(0f, 0.5f, 0f), AuraScale, Visuals.RadAuraMat);
-            _core = Visuals.Sphere("RadCore", transform, new Vector3(0f, 0.5f, 0f), AuraScale * 0.42f, Visuals.RadCoreMat);
+            _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale);
+            _core = Visuals.Sphere("RadCore", transform, new Vector3(0f, 0.5f, 0f), AuraScale * CoreRatio, Visuals.RadCoreMat);
+            All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.RadAura);
             _nextExpand = Time.time + Delay();
         }
@@ -111,7 +129,7 @@ namespace ClassicSlimes
             if (_core != null)
             {
                 if (_core.activeSelf != show) _core.SetActive(show);
-                if (show) _core.transform.localScale = Vector3.one * (AuraScale * 0.42f * Mathf.Max(_factor, 0.4f));
+                if (show) _core.transform.localScale = Vector3.one * (AuraScale * CoreRatio * Mathf.Max(_factor, 0.4f));
             }
             Snd.SetPlaying(_loop, show);
 
@@ -124,6 +142,7 @@ namespace ClassicSlimes
                 var p = U.Player;
                 if (p != null) _absorber = p.GetComponent<PlayerRadAbsorber>() ?? p.GetComponentInChildren<PlayerRadAbsorber>();
             }
+            RadHud.LastExposure = Time.time;
             if (_absorber != null) _absorber.Absorb(gameObject, Cfg.RadPerSecond.Value * dt);
             else if (Time.time > _fallbackTick) { _fallbackTick = Time.time + 2f; Dmg.Player(Cfg.RadDamagePerTick.Value, gameObject, "RadAbsorb", "SlimeAttack"); }
         }
@@ -282,7 +301,11 @@ namespace ClassicSlimes
         CalmedByWaterSpray _calm;
         SECTR_PointSource _loop;
         double _nextGlint;
-        float _nextPull;
+        float _nextPull, _nextFlare;
+        ParticleSystem _stars;
+        readonly GameObject[] _flares = new GameObject[2];
+        readonly float[] _flareT = { -1f, -1f };
+        readonly float[] _flareSize = new float[2];
 
         void Start()
         {
@@ -290,8 +313,43 @@ namespace ClassicSlimes
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
             _loop = Snd.Loop(gameObject, Snd.MosaicAura);
+            // SR1 look: white four-point stars twinkling on the glass + occasional bright glint flares
+            _stars = Gfx.Sparkles("MosaicStars", transform, new Vector3(0f, 0.55f, 0f), Visuals.StarMat, Color.white, new Color(0.7f, 0.9f, 1f, 1f), 2.6f, 0.75f, 0.22f, 0.5f, 0.5f, 8);
+            for (int i = 0; i < _flares.Length; i++)
+            {
+                _flares[i] = Gfx.Billboard("MosaicFlare", transform, Visuals.FlareMat, Vector3.zero, 0f);
+                _flares[i].SetActive(false);
+                var bb = _flares[i].GetComponent<Billboard>(); if (bb != null) bb.Spin = i == 0 ? 60f : -45f;
+            }
+            _nextFlare = Time.time + U.Rand(0.3f, 1.5f);
             var td = SceneContext.Instance != null ? SceneContext.Instance.TimeDirector : null;
             if (td != null) _nextGlint = td.HoursFromNow(U.Rand(0.05f, 0.4f));
+        }
+
+        void Flares(bool show)
+        {
+            float now = Time.time;
+            if (show && now > _nextFlare)
+            {
+                _nextFlare = now + U.Rand(0.7f, 2.4f);
+                for (int i = 0; i < _flares.Length; i++)
+                {
+                    if (_flares[i] == null || _flareT[i] >= 0f) continue;
+                    var d = UnityEngine.Random.onUnitSphere; d.y = Mathf.Abs(d.y) * 0.8f + 0.1f;
+                    _flares[i].transform.localPosition = new Vector3(0f, 0.5f, 0f) + d.normalized * 0.52f;
+                    _flareT[i] = 0f; _flareSize[i] = U.Rand(0.55f, 1.0f);
+                    _flares[i].SetActive(true);
+                    break;
+                }
+            }
+            for (int i = 0; i < _flares.Length; i++)
+            {
+                if (_flares[i] == null || _flareT[i] < 0f) continue;
+                _flareT[i] += Time.deltaTime / 0.55f;
+                if (_flareT[i] >= 1f || !show) { _flareT[i] = -1f; _flares[i].SetActive(false); continue; }
+                float k = Mathf.Sin(_flareT[i] * Mathf.PI);
+                _flares[i].transform.localScale = Vector3.one * (_flareSize[i] * k * k);
+            }
         }
 
         void Update()
@@ -299,6 +357,8 @@ namespace ClassicSlimes
             _glints.RemoveAll(g => g == null);
             bool day = U.IsDay();
             bool held = _vac != null && _vac.IsHeld();
+            Gfx.SetEmitting(_stars, !held);
+            Flares(!held);
             Snd.SetPlaying(_loop, day && !held);
             if (day && !held && Time.time > _nextPull) { _nextPull = Time.time + 1.5f; PullSlimes(); }
             if (!Cfg.MosaicGlints.Value || held) return;
@@ -371,7 +431,6 @@ namespace ClassicSlimes
             _phase = U.Rand(0f, 6f);
             var td = SceneContext.Instance.TimeDirector;
             _stateEnd = td.HoursFromNow(1f * U.Rand(0.8f, 1.2f));      // SR1: suspended for ~1 game hour
-            _fx = Fx.Attach("gold_sparkles", gameObject, Vector3.zero);
             _core = transform.childCount > 0 ? transform.GetChild(0).gameObject : null;
         }
 
@@ -381,9 +440,8 @@ namespace ClassicSlimes
             if (td == null) return;
             float t = Time.time + _phase;
             _spin += Time.deltaTime * (_state == State.Suspended ? 40f : 160f);
-            transform.rotation = Quaternion.Euler(0f, _spin, 0f);
             float pulse = _state == State.Suspended ? 1f + Mathf.Sin(t * 2f) * 0.12f : 1.25f + Mathf.Sin(t * 9f) * 0.25f;
-            if (_core != null) _core.transform.localScale = Vector3.one * 0.25f * pulse;
+            if (_core != null) _core.transform.localScale = Vector3.one * 1.1f * pulse;
 
             switch (_state)
             {
@@ -523,9 +581,27 @@ namespace ClassicSlimes
         bool _disguised, _debugged;
         float _nextDisguise, _disguiseUntil, _nextFlicker, _flickerEnd, _heldTime;
 
+        ParticleSystem _pixels;
+        static int _maskFrame = -1;
+        static float _nextMask;
+
+        /// <summary>SR1's glitch shader made the pixel cells jump around; swap between a few generated cell masks.</summary>
+        static void AnimateMask()
+        {
+            if (_maskFrame == Time.frameCount) return;
+            _maskFrame = Time.frameCount;
+            if (Time.time < _nextMask) return;
+            var masks = Visuals.GlitchMasks;
+            if (masks == null || masks.Length == 0 || !Visuals.Mats.TryGetValue("Glitch", out var m) || m == null) return;
+            bool burst = U.Rng.NextDouble() < 0.25;
+            _nextMask = Time.time + (burst ? U.Rand(0.05f, 0.12f) : U.Rand(0.4f, 1.6f));
+            m.SetTexture("_ColorMask", masks[U.Rng.Next(masks.Length)]);
+        }
+
         void Start()
         {
             All.Add(this);
+            _pixels = Gfx.Sparkles("GlitchPixels", transform, new Vector3(0f, 0.7f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.45f, 0.8f, 1f), 3.5f, 1.1f, 0.06f, 0.13f, 0.75f, 12, 0.15f);
             _app = GetComponent<SlimeAppearanceApplicator>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
@@ -535,6 +611,16 @@ namespace ClassicSlimes
 
         void OnDestroy() => All.Remove(this);
 
+        public static void ReapplyAll()
+        {
+            foreach (var g in All.ToArray())
+            {
+                if (g == null || g._app == null) continue;
+                g._own = g._app.Appearance;
+                if (g._own != null && !g._disguised) g.Apply(g._own);
+            }
+        }
+
         public static void RevertAllForSave()
         {
             foreach (var g in All.ToArray())
@@ -543,8 +629,10 @@ namespace ClassicSlimes
 
         void Update()
         {
+            AnimateMask();
             if (_app == null || _own == null) return;
             bool held = _vac != null && _vac.IsHeld();
+            Gfx.SetEmitting(_pixels, !held && !_disguised);
             if (held)
             {
                 if (_disguised) Reveal(true);

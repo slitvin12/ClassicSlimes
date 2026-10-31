@@ -20,6 +20,7 @@ namespace ClassicSlimes
         {
             Log = LoggerInstance;
             Cfg.Init();
+            Visuals.DomeStyle = Cfg.RadDomeStyle.Value;
             try { Behaviours.Register(); }
             catch (Exception e) { Log.Error("Register types failed: " + e); }
             try { Library.AddLanguages("localized"); }
@@ -49,6 +50,8 @@ namespace ClassicSlimes
             {
                 try { Diag.Static(); } catch (Exception e) { Log.Error("Diag.Static failed: " + e); }
             }
+            try { Foods.Setup(); }
+            catch (Exception e) { Log.Error("Foods.Setup failed: " + e); }
             try { SlimeFactory.CreateAll(); }
             catch (Exception e) { Log.Error("CreateAll failed: " + e); }
         }
@@ -60,12 +63,16 @@ namespace ClassicSlimes
                 _postLoaded = true;
                 try { Gc.Window("largo post-processing", SlimeFactory.PostProcessLargos); }
                 catch (Exception e) { Log.Error("PostProcessLargos failed: " + e); }
+                try { Gc.Window("largo diets", Foods.RefreshLargoDiets); }
+                catch (Exception e) { Log.Error("RefreshLargoDiets failed: " + e); }
             }
             if (Diag.Enabled) MelonCoroutines.Start(RuntimeDiag());
         }
 
         public override void OnUpdate()
         {
+            try { Mat.Tick(); } catch (Exception e) { Log.Warning("Mat.Tick: " + e.Message); }
+            RadHud.Tick();
             if (Diag.Enabled) DevCmd.Tick();
         }
 
@@ -79,6 +86,7 @@ namespace ClassicSlimes
             float t = 0f;
             while (t < 8f) { t += Time.unscaledDeltaTime; yield return null; }
             try { Diag.Runtime(); } catch (Exception e) { Log.Error("Diag.Runtime failed: " + e); }
+            try { DiagX.Run(); } catch (Exception e) { Log.Error("DiagX failed: " + e); }
             try { Gallery.DumpProps(); Gallery.Show(); } catch (Exception e) { Log.Error("Gallery failed: " + e); }
         }
     }

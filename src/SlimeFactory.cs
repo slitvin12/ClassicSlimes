@@ -50,7 +50,7 @@ namespace ClassicSlimes
             Add(new SlimeSpec
             {
                 Name = "Rad", Key = "rad",
-                Top = C(0.270f, 0.897f, 0.482f), Mid = C(0f, 0.5f, 0.0655f), Bot = C(0.112f, 0.228f, 0f), Ammo = C(0.129f, 0.792f, 0.149f),
+                Top = C(0.44f, 0.90f, 0.48f), Mid = C(0.27f, 0.62f, 0.31f), Bot = C(0.13f, 0.36f, 0.16f), Ammo = C(0.129f, 0.792f, 0.149f),   // SR2-style rad icon
                 Largo = true,
                 FoodGroups = new[] { Library.veggies },
                 FavoriteHints = new[] { "OcaOca", "Ocaoca", "Oca", "Beet" },
@@ -106,7 +106,7 @@ namespace ClassicSlimes
             Add(new SlimeSpec
             {
                 Name = "Glitch", Key = "glitch",
-                Top = C(0f, 1f, 0.09f), Mid = C(0.047f, 1f, 0f), Bot = C(0.736f, 0.142f, 0.499f), Ammo = C(0.894f, 0.271f, 0.604f),
+                Top = C(0.96f, 0.47f, 0.75f), Mid = C(0.89f, 0.32f, 0.64f), Bot = C(0.72f, 0.16f, 0.50f), Ammo = C(0.894f, 0.271f, 0.604f),   // SR1 shader drew it pink
                 Largo = false, HasPlort = false,
                 FoodGroups = new IdentifiableTypeGroup[0],
                 Zones = Library.SpawnLocations.LabyrinthHub | Library.SpawnLocations.LabyrinthWaterworks,

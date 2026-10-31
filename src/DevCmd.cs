@@ -83,8 +83,69 @@ namespace ClassicSlimes
                     var ps = SceneContext.Instance.PlayerState;
                     ClassicSlimesMod.Log.Msg($"[cmd] hp={ps.GetCurrHealth()}/{ps.GetMaxHealth()} rad={ps.GetCurrRad()}");
                     break;
+                case "dumpx": DiagX.Run(); break;
+                case "flt": foreach (var m in Tune(a[1])) m.SetFloat(a[2], F(a, 3, 0f)); break;
+                case "col": foreach (var m in Tune(a[1])) m.SetColor(a[2], new Color(F(a, 3, 0f), F(a, 4, 0f), F(a, 5, 0f), F(a, 6, 1f))); break;
+                case "kw": foreach (var m in Tune(a[1])) { if (a[3] == "on") m.EnableKeyword(a[2]); else m.DisableKeyword(a[2]); } break;
+                case "mats": ClassicSlimesMod.Log.Msg("[cmd] mats: " + string.Join(", ", Visuals.Mats.Keys)); break;
+                case "pose": Pose(a.Length > 1 ? a[1] : "Rad", F(a, 2, 2.6f), F(a, 3, 10f), F(a, 4, -0.45f), F(a, 5, 0f)); break;
+                case "vac": Vac(a.Length < 2 || a[1] != "on"); break;
+                case "domes": Domes(); break;
+                case "dome": Visuals.DomeStyle = (int)F(a, 1, 0f); RadSlime.RestyleAll(); break;
+                case "texdump": TexDump(a[1], a.Length > 2 ? a[2] : "_MainTex"); break;
+                case "glitchface":
+                    {
+                        var sp = SlimeFactory.Spec("Glitch");
+                        var f = Visuals.GlitchFace(a.Length < 2 || a[1] != "sr2");
+                        if (sp?.Def != null && f != null) { sp.Def.AppearancesDefault[0]._face = f; GlitchSlime.ReapplyAll(); }
+                        break;
+                    }
+                case "radhud": RadHud.Offset = new Vector2(F(a, 1, 0f), F(a, 2, 78f)); RadHud.Place(); break;
+                case "foods":
+                    foreach (var fs in Foods.All) L($"food {fs.Ident} type={(fs.Type != null)} name={(fs.Type?.localizedName != null ? fs.Type.localizedName.GetLocalizedString() : "-")} veg={Foods.Ready}");
+                    foreach (var kv in Foods.Added) L($"  wild {kv.Key} x{kv.Value}");
+                    break;
+                case "matinfo": MatInfo(a[1]); break;
+                case "facedump":
+                    {
+                        var sp = SlimeFactory.Spec(a.Length > 1 ? a[1] : "Glitch");
+                        var face = sp?.Def?.AppearancesDefault?[0]?._face;
+                        L($"facedump {sp?.Name} face={(face != null ? face.name : "null")} healed={Faces.Healed} blocked={DestroyGuard.Blocked} destroyedMats={Mat.Destroyed}");
+                        if (face != null)
+                            foreach (var (ex, e, mo) in Faces.Read(face))
+                                L($"  {ex}: eyes={FN(e)} mouth={FN(mo)}");
+                        break;
+                    }
+                case "props": Props(a[1]); break;
+                case "rinfo": RInfo(a.Length > 1 ? a[1] : "Rad"); break;
+                case "revive": Mat.Tick(true); L("revived total " + Mat.Revived); break;
+                case "killall":
+                    {
+                        var cam = Camera.main; int n = 0;
+                        foreach (var id in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+                        {
+                            if (id == null || cam == null || id.identType == null || id.identType.TryCast<SlimeDefinition>() == null) continue;
+                            if ((id.transform.position - cam.transform.position).sqrMagnitude > F(a, 1, 20f) * F(a, 1, 20f)) continue;
+                            Destroyer.DestroyActor(id.gameObject, "ClassicSlimes.DevCmd", true); n++;
+                        }
+                        L("killall " + n);
+                        break;
+                    }
+                case "rad":
+                    SceneContext.Instance.PlayerState.AddRads(F(a, 1, 50f));
+                    break;
                 default: ClassicSlimesMod.Log.Warning("[cmd] unknown: " + l); break;
             }
+        }
+
+        /// <summary>Materials for live tuning: a Visuals.Mats key, or every loaded material with that exact name.</summary>
+        static List<Material> Tune(string key)
+        {
+            var r = new List<Material>();
+            if (Visuals.Mats.TryGetValue(key, out var m) && m != null) r.Add(m);
+            foreach (var x in Resources.FindObjectsOfTypeAll<Material>()) if (x != null && x.name == key && !r.Contains(x)) r.Add(x);
+            if (r.Count == 0) ClassicSlimesMod.Log.Warning("[cmd] no material " + key);
+            return r;
         }
 
         static List<GameObject> AllClassic()
@@ -137,6 +198,153 @@ namespace ClassicSlimes
         }
 
         static void L(string m) => ClassicSlimesMod.Log.Msg("[cmd] " + m);
+
+        static string ShInfo(Material m)
+        {
+            if (m == null) return "<null material>";
+            var sh = m.shader;
+            if (sh == null) return $"{m.name} shader=<null>";
+            return $"{m.name} shader={sh.name}#{sh.GetInstanceID()} ok={sh.isSupported} passes={sh.passCount} rq={m.renderQueue} kw=[{string.Join(" ", (IEnumerable<string>)m.shaderKeywords)}]";
+        }
+
+        static void Props(string name)
+        {
+            Material m = null;
+            if (!Visuals.Mats.TryGetValue(name, out m) || m == null)
+                foreach (var x in Resources.FindObjectsOfTypeAll<Material>()) if (x != null && x.name == name) { m = x; break; }
+            if (m == null || m.shader == null) { L("props: none " + name); return; }
+            var sh = m.shader;
+            var sb = new System.Text.StringBuilder();
+            int n = sh.GetPropertyCount();
+            for (int i = 0; i < n; i++)
+            {
+                var pn = sh.GetPropertyName(i);
+                var t = sh.GetPropertyType(i);
+                string v;
+                switch (t)
+                {
+                    case UnityEngine.Rendering.ShaderPropertyType.Color: v = m.GetColor(pn).ToString(); break;
+                    case UnityEngine.Rendering.ShaderPropertyType.Vector: v = m.GetVector(pn).ToString(); break;
+                    case UnityEngine.Rendering.ShaderPropertyType.Texture: var tx = m.GetTexture(pn); v = tx != null ? tx.name : "null"; break;
+                    default: v = m.GetFloat(pn).ToString("0.###", CultureInfo.InvariantCulture); break;
+                }
+                sb.Append(' ').Append(pn).Append('=').Append(v);
+            }
+            File.WriteAllText(Path.Combine(Diag.Dir, "props_" + name.Replace('/', '_') + ".txt"), ShInfo(m) + "\n" + sb.ToString().Replace(" _", "\n_"));
+            L("props written for " + name);
+        }
+
+        static void MatInfo(string name)
+        {
+            foreach (var m in Resources.FindObjectsOfTypeAll<Material>())
+                if (m != null && (m.name == name || m.name == "ClassicSlimes_" + name)) L("matinfo " + ShInfo(m) + " id=" + m.GetInstanceID());
+            if (Visuals.Mats.TryGetValue(name, out var vm)) L("matinfo key " + ShInfo(vm));
+        }
+
+        static void RInfo(string def)
+        {
+            var cam = Camera.main; if (cam == null) return;
+            GameObject best = null; float bd = float.MaxValue;
+            foreach (var id in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+            {
+                var t = id != null ? id.identType : null;
+                if (t == null || !string.Equals(t.name, def, StringComparison.OrdinalIgnoreCase)) continue;
+                float d = (id.transform.position - cam.transform.position).sqrMagnitude;
+                if (d < bd) { bd = d; best = id.gameObject; }
+            }
+            if (best == null) { L("rinfo: no " + def); return; }
+            foreach (var r in best.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r == null) continue;
+                var mats = r.sharedMaterials;
+                for (int i = 0; i < mats.Length; i++)
+                    L($"rinfo {def} {r.gameObject.name} [{r.GetIl2CppType().Name} en={r.enabled} vis={r.isVisible} b={r.bounds.size}] #{i} {ShInfo(mats[i])}");
+            }
+        }
+
+        /// <summary>Puts the nearest slime of the given definition in front of the camera at eye level and freezes it (for screenshots).</summary>
+        static void Pose(string def, float dist, float seconds, float dy, float yaw)
+        {
+            var cam = Camera.main; if (cam == null) return;
+            var p = cam.transform.position;
+            GameObject best = null; float bd = float.MaxValue;
+            foreach (var id in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+            {
+                var t = id != null ? id.identType : null;
+                if (t == null || !string.Equals(t.name, def, StringComparison.OrdinalIgnoreCase)) continue;
+                float d = (id.transform.position - p).sqrMagnitude;
+                if (d < bd) { bd = d; best = id.gameObject; }
+            }
+            if (best == null) { L("pose: no " + def); return; }
+            // along the real view direction (camera pitch is not always level), facing the camera
+            var fwd = cam.transform.forward;
+            var up = cam.transform.up;
+            var pos = p + fwd * dist + up * dy;
+            var rb = best.GetComponent<Rigidbody>();
+            if (rb != null) { rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
+            best.transform.position = pos;
+            best.transform.rotation = Quaternion.LookRotation(-fwd, up) * Quaternion.Euler(0f, yaw, 0f);
+            L($"pose {def} at {pos}");
+        }
+
+        static readonly List<Renderer> _hiddenVac = new();
+        static void Vac(bool hide)
+        {
+            if (!hide) { foreach (var r in _hiddenVac) if (r != null) r.enabled = true; _hiddenVac.Clear(); return; }
+            var cam = Camera.main; if (cam == null) return;
+            var root = cam.transform.root;
+            foreach (var r in root.GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || !r.enabled) continue;
+                if ((r.transform.position - cam.transform.position).sqrMagnitude > 4f) continue;
+                r.enabled = false; _hiddenVac.Add(r);
+            }
+            L($"vac hidden renderers: {_hiddenVac.Count}");
+        }
+
+        static GameObject _domes;
+        static void Domes()
+        {
+            if (_domes != null) UnityEngine.Object.Destroy(_domes);
+            var cam = Camera.main; if (cam == null) return;
+            _domes = new GameObject("ClassicSlimesDomes");
+            var fwd = cam.transform.forward; fwd.y = 0; fwd.Normalize();
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var c = cam.transform.position + fwd * 6.5f + Vector3.down * 0.3f;
+            int n = Visuals.DomeNames.Length;
+            for (int i = 0; i < n; i++)
+            {
+                int row = i / 4, col = i % 4;
+                var pos = c + right * ((col - 1.5f) * 2.3f) + Vector3.up * (row == 0 ? 1.1f : -1.1f);
+                var go = Visuals.MakeDome(_domes.transform, Vector3.zero, 2f, i);
+                go.name = "Dome_" + Visuals.DomeNames[i];
+                go.transform.position = pos;
+                if (i == 0)
+                {
+                    var core = Visuals.Sphere("Core", _domes.transform, Vector3.zero, 1.2f, Visuals.RadCoreMat);
+                    core.transform.position = c + right * 5.9f;
+                }
+            }
+            L("domes: " + string.Join(", ", Visuals.DomeNames) + " + core (right)");
+        }
+
+        static void TexDump(string matName, string prop)
+        {
+            Texture tex = null;
+            foreach (var m in Tune(matName)) if (m.HasProperty(prop)) { tex = m.GetTexture(prop); if (tex != null) break; }
+            if (tex == null) { foreach (var t in Resources.FindObjectsOfTypeAll<Texture2D>()) if (t != null && t.name == matName) { tex = t; break; } }
+            if (tex == null) { L("texdump: nothing for " + matName + " " + prop); return; }
+            var rt = RenderTexture.GetTemporary(tex.width, tex.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            Graphics.Blit(tex, rt);
+            var prev = RenderTexture.active; RenderTexture.active = rt;
+            var outT = new Texture2D(tex.width, tex.height, TextureFormat.RGBA32, false);
+            outT.ReadPixels(new Rect(0, 0, tex.width, tex.height), 0, 0); outT.Apply();
+            RenderTexture.active = prev; RenderTexture.ReleaseTemporary(rt);
+            var png = Il2CppImageConversionManager.EncodeToPNG(outT);
+            var file = Path.Combine(Diag.Dir, "tex_" + tex.name + ".png");
+            File.WriteAllBytes(file, png);
+            L($"texdump {tex.name} {tex.width}x{tex.height} -> {file}");
+        }
 
         static void Locs()
         {
@@ -318,6 +526,8 @@ namespace ClassicSlimes
             L($"  natural spawns since start: {_spawnTotal}");
             foreach (var kv in _spawned) if (ClassicOf(kv.Key) != null || kv.Value >= 1) L($"    {kv.Key} x{kv.Value}");
         }
+
+        static string FN(Material m) => (object)m == null ? "ZERO" : m == null ? "DESTROYED" : m.name + (m.shader != null ? "" : " (no shader)");
 
         static void Clear()
         {

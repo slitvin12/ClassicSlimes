@@ -117,8 +117,10 @@ namespace ClassicSlimes
         }
     }
 
-    [HarmonyPatch(typeof(DirectedActorSpawner), nameof(DirectedActorSpawner.CanSpawn))]
-    static class SpawnerCanSpawnPatch
+    // NB: CanSpawn/GetEligibleConstraints take Nullable<float>; Harmony trampolines for those crash in Il2CppInterop
+    // (NullReferenceException in Memmove every frame). These two have no nullable parameters.
+    [HarmonyPatch(typeof(DirectedActorSpawner), nameof(DirectedActorSpawner.CanSpawnSomething))]
+    static class SpawnerCanSpawnSomethingPatch
     {
         static void Prefix(DirectedActorSpawner __instance)
         {
@@ -126,8 +128,8 @@ namespace ClassicSlimes
         }
     }
 
-    [HarmonyPatch(typeof(DirectedActorSpawner), nameof(DirectedActorSpawner.GetEligibleConstraints))]
-    static class SpawnerEligiblePatch
+    [HarmonyPatch(typeof(DirectedActorSpawner), nameof(DirectedActorSpawner.Spawn))]
+    static class SpawnerSpawnPatch
     {
         static void Prefix(DirectedActorSpawner __instance)
         {

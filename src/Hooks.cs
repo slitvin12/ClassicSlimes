@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using Il2Cpp;
@@ -8,6 +10,36 @@ using UnityEngine;
 
 namespace ClassicSlimes
 {
+    /// <summary>
+    /// SR2 calls Object.Destroy on face materials it believes are per-slime instances. Stock face materials are assets,
+    /// which Unity refuses to destroy, but ours are runtime materials, so the shared mouth of a whole slime kind got
+    /// destroyed and rendered magenta. Destroy calls on our shared face materials are skipped.
+    /// </summary>
+    [HarmonyPatch]
+    static class DestroyGuard
+    {
+        public static int Blocked;
+        static IEnumerable<MethodBase> TargetMethods()
+        {
+            foreach (var m in typeof(UnityEngine.Object).GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (m.Name != "Destroy" && m.Name != "DestroyImmediate") continue;
+                var ps = m.GetParameters();
+                if (ps.Length >= 1 && ps[0].ParameterType == typeof(UnityEngine.Object)) yield return m;
+            }
+        }
+
+        static bool Prefix(UnityEngine.Object __0)
+        {
+            if (Faces.Protected.Count == 0 || (object)__0 == null) return true;
+            IntPtr p;
+            try { p = __0.Pointer; } catch { return true; }
+            if (!Faces.Protected.Contains(p)) return true;
+            if (Blocked++ == 0) ClassicSlimesMod.Log.Msg("[faces] the game tried to destroy shared face material " + __0.name + " - kept alive (further cases are silent)");
+            return false;
+        }
+    }
+
     /// <summary>Water (SR2 CalmedByWaterSpray) pops quantum ghosts, fizzles mosaic glints and reveals glitch slimes.</summary>
     [HarmonyPatch(typeof(CalmedByWaterSpray), nameof(CalmedByWaterSpray.AddLiquid))]
     static class WaterPatch
