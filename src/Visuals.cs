@@ -184,12 +184,15 @@ namespace ClassicSlimes
             var m = BodyMat("Quantum", s, "HyperDefaultRingtailDefault_Body", "slimeRingtailBase", "slimeTwinBase", "slimePinkBase");
             if (m != null)
             {
-                m.Palette(new Color(1f, 0.86f, 0.30f), new Color(1f, 0.70f, 0.12f), new Color(0.93f, 0.50f, 0.07f));
+                m.Palette(new Color(1f, 0.82f, 0.26f), new Color(0.98f, 0.64f, 0.10f), new Color(0.85f, 0.45f, 0.06f));   // SR1 icon: golden
                 m.Kw("_ENABLETWINEFFECT_ON", false); m.Flt("_EnableTwinEffect", 0f);
+                m.Kw("_ENABLEVORTEX_ON", false);
                 m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
                 m.Tx("_ColorMask", Gfx.SwirlMask);
+                m.SetTextureScale("_ColorMask", Gfx.SwirlScale);
+                m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
                 m.Flt("_ColorMaskUV1", 0f);
-                m.Col("_RedTopColor", new Color(1f, 0.98f, 0.72f)); m.Col("_RedMiddleColor", new Color(1f, 0.93f, 0.58f)); m.Col("_RedBottomColor", new Color(1f, 0.82f, 0.45f));
+                m.Col("_RedTopColor", new Color(1f, 0.96f, 0.66f)); m.Col("_RedMiddleColor", new Color(1f, 0.90f, 0.52f)); m.Col("_RedBottomColor", new Color(1f, 0.80f, 0.40f));
                 m.Col("_GreenTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_GreenMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_GreenBottomColor", new Color(1f, 0.65f, 0.25f));
                 m.Col("_BlueTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_BlueMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_BlueBottomColor", new Color(1f, 0.65f, 0.25f));
                 m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);

@@ -245,43 +245,40 @@ namespace ClassicSlimes
         /// Quantum swirl marks for the multi-colour body shader: a few Archimedean spirals ("@" marks) in the red
         /// channel, tileable (wrapped distances), anti-aliased.
         /// </summary>
+        /// <summary>Placement of the quantum swirl on the body UVs (tunable live with the "texst" dev command).</summary>
+        public static Vector2 SwirlScale = new Vector2(1f, 1f), SwirlOffset = new Vector2(0f, 0f);
+
+        /// <summary>
+        /// SR1 quantum body: ONE big light swirl (~2.6 turns, the arm thins out towards its outer end, bright dot in
+        /// the centre) on the golden body, red channel. One swirl per texture tile.
+        /// </summary>
         public static Texture2D SwirlMask
         {
             get
             {
                 const int N = 512;
-                var rng = new System.Random(7177);
-                var sp = new List<Vector4>();   // x, y, radius, b (arm spacing = 2*pi*b)
-                for (int i = 0; i < 7; i++)
+                const float R = 165f, Turns = 2.6f;
+                float b = R / (2f * Mathf.PI * Turns);
+                return Generated("swirlmask1", N, N, (x, y) =>
                 {
-                    float r = 34f + 30f * (float)rng.NextDouble();
-                    sp.Add(new Vector4((float)rng.NextDouble() * N, (float)rng.NextDouble() * N, r, r / (2f * Mathf.PI * 2.3f)));   // ~2.3 turns
-                }
-                return Generated("swirlmask", N, N, (x, y) =>
-                {
-                    float best = 0f;
-                    foreach (var c in sp)
+                    float dx = x - N / 2f, dy = y - N / 2f;
+                    float r = Mathf.Sqrt(dx * dx + dy * dy);
+                    float a = 0f;
+                    if (r < R + 2f)
                     {
-                        float dx = x - c.x, dy = y - c.y;
-                        if (dx > N / 2) dx -= N; else if (dx < -N / 2) dx += N;
-                        if (dy > N / 2) dy -= N; else if (dy < -N / 2) dy += N;
-                        float r = Mathf.Sqrt(dx * dx + dy * dy);
-                        if (r > c.z + 4f) continue;
                         float th = Mathf.Atan2(dy, dx);
-                        float ph = (r / c.w - th) / (2f * Mathf.PI);       // arms where ph is an integer
+                        float ph = (r / b - th) / (2f * Mathf.PI);       // arms where ph is an integer
                         float f = ph - Mathf.Floor(ph);
-                        float d = Mathf.Min(f, 1f - f) * c.w * 2f * Mathf.PI;  // pixels to the nearest arm
-                        float half = c.w * 1.1f;                                   // line = ~35% of the arm spacing
-                        float a = Mathf.Clamp01((half - d) / 1.5f + 0.5f);
-                        a *= Mathf.Clamp01((c.z - r) / 4f) * Mathf.Clamp01(r / 3f);
-                        if (a > best) best = a;
+                        float d = Mathf.Min(f, 1f - f) * b * 2f * Mathf.PI;  // pixels to the nearest arm
+                        float half = b * Mathf.PI * (0.42f - 0.18f * Mathf.Clamp01(r / R));
+                        a = Mathf.Clamp01((half - d) / 1.5f + 0.5f) * Mathf.Clamp01((R - r) / 10f) * Mathf.Clamp01(r / 4f);
                     }
-                    return new Color(best, 0f, 0f, 1f);
+                    a = Mathf.Max(a, Mathf.Clamp01((b * 1.2f - r) / 2f + 0.5f));
+                    return new Color(a, 0f, 0f, 1f);
                 }, true);
             }
         }
 
-        /// <summary>Hologram scanlines (white, alpha = line strength) with one brighter sweeping band.</summary>
         public static Texture2D ScanlineTex => Generated("scanlines", 4, 256, (x, y) =>
         {
             float a = 0.10f;

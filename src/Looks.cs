@@ -54,6 +54,8 @@ namespace ClassicSlimes
                 if (tpl.HasProperty("_GlowNoise")) m.Tx("_GlowNoise", tpl.GetTexture("_GlowNoise"));
                 if (tpl.HasProperty("_GlowNoiseSpeed")) m.Flt("_GlowNoiseSpeed", tpl.GetFloat("_GlowNoiseSpeed"));
             }
+            // swapping the shader resets the queue to 2000; stock faces (and eyeInvoke) draw at 2450 after the body
+            m.renderQueue = tpl != null ? tpl.renderQueue : src.renderQueue;
             return m;
         }
 
@@ -168,9 +170,9 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1: SR/AMP/Slime/Body/Rad (self-lit, very saturated green with a light rim) -> SR2 phosphor body
-            // (phos-core glow) + hyper fresnel rim, both exist together on the hyper-phosphor largo material
-            var m = BodyMat("Rad", s, "HyperDefaultPhosphorDefault_Body", "slimePhosphorBase", "slimePinkBase");
+            // SR1: SR/AMP/Slime/Body/Rad (self-lit, very saturated green) -> SR2 phosphor body (phos-core glow).
+            // Not the hyper-phosphor material: its polar hyper noise + vortex drew lots of smile-like arcs on the body.
+            var m = BodyMat("Rad", s, "slimePhosphorBase", "slimePinkBase");
             if (m != null)
             {
                 m.Palette(new Color(0.42f, 1f, 0.36f), new Color(0.10f, 0.88f, 0.18f), new Color(0.03f, 0.55f, 0.09f));
@@ -180,14 +182,8 @@ namespace ClassicSlimes
                 m.Flt("_GlowMin", 0.45f);
                 m.Flt("_GlowMax", 1f);
                 m.Flt("_GlossPower", 0.6f);
-                if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
-                {
-                    m.Col("_HyperFresnelColor", new Color(0.70f, 1f, 0.55f, 0f));
-                    m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
-                    m.Flt("_HyperFresnelIntensity", 1.6f);
-                    m.Flt("_HyperFresnelSparksNoiseIntensity", 25f);
-                    m.Flt("_HyperFresnelSecondaryNoiseIntensity", 15f);
-                }
+                m.Kw("_ENABLEHYPEREFFECT_ON", false); m.Flt("_EnableHyperEffect", 0f);
+                m.Kw("_ENABLEVORTEX_ON", false);
                 SetBodyMaterial(app, m);
             }
             try { var f = RadFace(app._face); if (f != null) app._face = f; }
@@ -373,13 +369,14 @@ namespace ClassicSlimes
             var m = Mat.Clone("MosaicBody", "slimeFlutterWingFlutterNormalHyperNormal", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
             if (m == null) return null;
             m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
-            // seams: pale glassy blue-lavender
-            m.Palette(new Color(0.62f, 0.66f, 1f), new Color(0.80f, 0.88f, 1f), new Color(0.92f, 0.86f, 1f));
+            // seams: light glassy blue (not white - white seams washed the whole slime out)
+            m.Palette(new Color(0.42f, 0.52f, 1f), new Color(0.55f, 0.68f, 1f), new Color(0.70f, 0.72f, 1f));
             m.Tx("_ColorMask", Res.Tex("msk_mosaic", true));
             m.Flt("_ColorMaskUV1", 0f);
-            m.Col("_RedTopColor", new Color(0.36f, 0.86f, 0.22f)); m.Col("_RedMiddleColor", new Color(0.80f, 0.93f, 0.16f)); m.Col("_RedBottomColor", new Color(1f, 0.55f, 0.10f));
-            m.Col("_GreenTopColor", new Color(0.58f, 0.93f, 0.28f)); m.Col("_GreenMiddleColor", new Color(1f, 0.86f, 0.14f)); m.Col("_GreenBottomColor", new Color(1f, 0.38f, 0.10f));
-            m.Col("_BlueTopColor", new Color(0.38f, 0.42f, 1f)); m.Col("_BlueMiddleColor", new Color(0.62f, 0.45f, 1f)); m.Col("_BlueBottomColor", new Color(1f, 0.72f, 0.18f));
+            // SR1 tiles: blue / violet / cyan at the top, greens in the middle, yellow / orange / red at the bottom
+            m.Col("_RedTopColor", new Color(0.25f, 0.40f, 1f)); m.Col("_RedMiddleColor", new Color(0.25f, 0.85f, 0.25f)); m.Col("_RedBottomColor", new Color(1f, 0.58f, 0.08f));
+            m.Col("_GreenTopColor", new Color(0.50f, 0.32f, 0.95f)); m.Col("_GreenMiddleColor", new Color(0.62f, 0.92f, 0.12f)); m.Col("_GreenBottomColor", new Color(1f, 0.85f, 0.10f));
+            m.Col("_BlueTopColor", new Color(0.20f, 0.70f, 0.95f)); m.Col("_BlueMiddleColor", new Color(0.20f, 0.78f, 0.40f)); m.Col("_BlueBottomColor", new Color(0.95f, 0.30f, 0.10f));
             m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
             m.Kw("_ENABLENORMALS_ON", true); m.Flt("_EnableNormals", 1f);
             m.Tx("_Normal", Res.Tex("nrm_mosaic", true));
@@ -391,11 +388,14 @@ namespace ClassicSlimes
             if (m.IsKeywordEnabled("_ENABLEHYPEREFFECT_ON"))
             {
                 m.Flt("_EnableHyperEffect", 1f);
-                m.Col("_HyperFresnelColor", new Color(0.42f, 0.36f, 1f, 0f));
+                // only a soft violet edge: no hyper noise arcs, no strong soft glow over the whole body
+                m.Col("_HyperFresnelColor", new Color(0.55f, 0.50f, 1f, 0f));
                 m.Flt("_HyperBodyColorAlbedoIntensity", 1f);
-                m.Flt("_HyperFresnelIntensity", 1.8f);
-                m.Flt("_HyperFresnelSparksNoiseIntensity", 10f);
-                m.Flt("_HyperFresnelSecondaryNoiseIntensity", 10f);
+                m.Flt("_HyperFresnelIntensity", 1f);
+                m.Flt("_HyperFresnelSoftGlowIntensity", 3f);
+                m.Flt("_HyperFresnelSparksNoiseIntensity", 0f);
+                m.Flt("_HyperFresnelSecondaryNoiseIntensity", 0f);
+                m.Kw("_ENABLEVORTEX_ON", false);
             }
             Keep(m, "Mosaic");
             return m;

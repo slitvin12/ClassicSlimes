@@ -135,6 +135,15 @@ namespace ClassicSlimes
                     SceneContext.Instance.PlayerState.AddRads(F(a, 1, 50f));
                     break;
                 case "pedia": Pedia(a.Length > 1 ? a[1] : "Rad"); break;
+                case "texst":
+                    foreach (var m in Tune(a[1]))
+                    {
+                        m.SetTextureScale(a[2], new Vector2(F(a, 3, 1f), F(a, 4, 1f)));
+                        m.SetTextureOffset(a[2], new Vector2(F(a, 5, 0f), F(a, 6, 0f)));
+                    }
+                    if (a[1] == "Quantum" && a[2] == "_ColorMask") { Gfx.SwirlScale = new Vector2(F(a, 3, 1f), F(a, 4, 1f)); Gfx.SwirlOffset = new Vector2(F(a, 5, 0f), F(a, 6, 0f)); }
+                    break;
+                case "vec": foreach (var m in Tune(a[1])) m.SetVector(a[2], new Vector4(F(a, 3, 0f), F(a, 4, 0f), F(a, 5, 0f), F(a, 6, 0f))); break;
                 case "palette": Palettes(); break;
                 case "phase":
                     {
