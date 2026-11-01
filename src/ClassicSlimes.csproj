@@ -12,6 +12,8 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
     <SR2Dir Condition="'$(SR2Dir)'==''">D:\SteamLibrary\steamapps\common\Slime Rancher 2</SR2Dir>
+    <!-- Cotton to build against: the game's Mods\CottonLibrary.dll, or a CottonForge build (-p:CottonDll=...\CottonLibrary.dll) -->
+    <CottonDll Condition="'$(CottonDll)'==''">$(SR2Dir)\Mods\CottonLibrary.dll</CottonDll>
     <NoWarn>CS0618;CS8632;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
   <ItemGroup>
@@ -20,7 +22,7 @@
     <Reference Include="$(SR2Dir)\MelonLoader\net6\Il2CppInterop.Runtime.dll" Private="false" />
     <Reference Include="$(SR2Dir)\MelonLoader\net6\Il2CppInterop.Common.dll" Private="false" />
     <Reference Include="$(SR2Dir)\MelonLoader\net6\UnityEngine.Il2CppImageConversionManager.dll" Private="false" />
-    <Reference Include="$(SR2Dir)\Mods\CottonLibrary.dll" Private="false" />
+    <Reference Include="$(CottonDll)" Private="false" />
     <Reference Include="$(SR2Dir)\MelonLoader\Il2CppAssemblies\*.dll" Private="false" />
   </ItemGroup>
   <ItemGroup>

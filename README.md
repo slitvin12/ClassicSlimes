@@ -170,6 +170,8 @@ dotnet build -c Release -p:Deploy=true -p:SR2Dir="D:\SteamLibrary\steamapps\comm
 ```
 Нужен .NET SDK 6+ и установленная игра с MelonLoader (сборки Il2Cpp берутся из `MelonLoader\Il2CppAssemblies`)
 и `Mods\CottonLibrary.dll`. `-p:Deploy=true` копирует DLL в папку Mods.
+Собрать против другой `CottonLibrary.dll` (например, нашего форка CottonForge) — `-p:CottonDll="...\CottonLibrary.dll"`;
+план переноса на форк — [`docs/cottonforge-migration.md`](docs/cottonforge-migration.md).
 
 ## Структура
 - `src/` — исходники мода: `Main.cs` (жизненный цикл), `SlimeFactory.cs` (определения, диеты, плорты, ларго),
@@ -185,6 +187,7 @@ dotnet build -c Release -p:Deploy=true -p:SR2Dir="D:\SteamLibrary\steamapps\comm
   `crashloop.py` — серия запусков с подсчётом падений, `sym.py` — символизация смещений `coreclr.dll`, `pose.py` — скриншоты слаймов через мост
   CreatorToolkit, `api.py` — дамп API игры из сборок Il2Cpp).
   Пути в скриптах и `env.cmd` — локальные, поправьте под себя.
+- `docs/cottonforge-migration.md` — план переноса на CottonForge: этапы, карта модулей, риски.
 
 Декомпилированный код игры и других модов в репозиторий не входит.
 
