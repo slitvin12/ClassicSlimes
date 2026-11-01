@@ -92,14 +92,14 @@ namespace ClassicSlimes
         public static SlimeFace QuantumFace(SlimeFace src)
         {
             if (_quantumFace != null || src == null) return _quantumFace;
-            // SR1 quantum: glowing yellow eyes (mouth stays stock)
+            // SR1 quantum: glowing dark amber eyes (pale yellow ones vanished on the golden body); mouth stays stock
             _quantumFace = Faces.Clone(src, "faceSlimeQuantum",
                 e =>
                 {
                     var m = GlowFaceMat(e, true, "_Quantum");
-                    m.Col("_EyeRed", new Color(1f, 0.93f, 0.42f, 1f));
-                    m.Col("_EyeGreen", new Color(1f, 0.97f, 0.55f, 1f));
-                    m.Col("_EyeBlue", new Color(1f, 1f, 0.92f, 1f));
+                    m.Col("_EyeRed", new Color(0.50f, 0.20f, 0f, 1f));     // main eye
+                    m.Col("_EyeGreen", new Color(0.82f, 0.42f, 0.03f, 1f)); // inner
+                    m.Col("_EyeBlue", new Color(1f, 0.88f, 0.55f, 1f));    // highlight
                     m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));
                     Mats["QuantumEyes_" + e.name] = m;
                     return m;
@@ -230,21 +230,21 @@ namespace ClassicSlimes
                     foreach (var p in new[] { "_TintColor", "_Tint", "_Color", "_BaseColor" }) m.Col(p, new Color(1f, 1f, 1f, 1f));
                     m.Flt("_DepthFadeDistance", 0.25f);
                     break;
-                case 0:   // SR1 RadAura: one clear sphere that refracts what is behind it, soft green fresnel edge
+                case 0:   // SR1 RadAura: one dense green sphere that refracts what is behind it, bright green fresnel edge
                     m = Mat.Clone("RadDome0", "envLabGlass", "SimpleGlass");
                     if (m == null) break;
-                    m.Col("_Color", new Color(0.10f, 1f, 0.16f, 0f));
-                    m.Flt("_Opacity", 0.22f);
-                    m.Flt("_Smoothness", 0.9f);
-                    m.Flt("_Metallic", 0.2f);
+                    m.Col("_Color", new Color(0.15f, 1f, 0.20f, 0f));
+                    m.Flt("_Opacity", 0.42f);           // 0.22 read as a clear soap bubble
+                    m.Flt("_Smoothness", 0.62f);        // less mirror-like: the sky made the edge blue
+                    m.Flt("_Metallic", 0f);
                     m.Tx("_NormalMap", GameTex("dptNoiseClouds") ?? GameTex("nrm_envGlass01"));
                     m.Flt("_NormalStrength", 0.35f);
                     m.Tx("_Reflection", RadRimTex);
-                    m.Flt("_ReflectionIntensity", 12f);
-                    m.Flt("_ReflectionFresnelScale", 1.2f);
-                    m.Flt("_ReflectionFresnelPower", 1.8f);
+                    m.Flt("_ReflectionIntensity", 32f);
+                    m.Flt("_ReflectionFresnelScale", 1.5f);
+                    m.Flt("_ReflectionFresnelPower", 1.25f);
                     m.Flt("_ReflectionNormalStrength", 0.1f);
-                    m.Col("_ReflectionTint", new Color(0.18f, 1f, 0.20f, 0f));
+                    m.Col("_ReflectionTint", new Color(0.25f, 1f, 0.22f, 0f));
                     m.Flt("_DistortionStrength", 26f);
                     m.Flt("_DistortionBlur", 0.015f);
                     m.Flt("_FresnelDistortionBlur", 0.25f);
@@ -326,6 +326,29 @@ namespace ClassicSlimes
                 m.Flt("_DepthFade", 1f);
                 _radCore = Keep(m, "RadCore");
                 return _radCore;
+            }
+        }
+
+        static Material _radMote;
+        /// <summary>Soft glowing green motes floating inside the rad aura (SR2 additive sparkle material with a round dot).</summary>
+        public static Material RadMoteMat
+        {
+            get
+            {
+                if (_radMote != null) return _radMote;
+                var m = Mat.Clone("RadMote", "Gold Slime Sparkle");
+                if (m == null) return null;
+                m.Tx("_MainTex", Gfx.Generated("radMote", 32, 32, (x, y) =>
+                {
+                    float dx = (x + 0.5f) / 16f - 1f, dy = (y + 0.5f) / 16f - 1f;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float a = Mathf.Clamp01(1f - d); a = a * a * (3f - 2f * a);
+                    a = Mathf.Clamp01(a * 0.8f + Mathf.Clamp01(1f - d * 2.4f) * 0.6f);   // soft halo + brighter core
+                    return new Color(a, a, a, a);
+                }, false));
+                m.Col("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.8f));
+                _radMote = Keep(m, "RadMote");
+                return _radMote;
             }
         }
 

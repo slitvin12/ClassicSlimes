@@ -86,12 +86,13 @@ namespace ClassicSlimes
         const float ExpandFactor = 1.5f, ExpandingTime = 3f, ExpandedTime = 10f, CalmingTime = 0.2f;
 
         GameObject _aura, _core;
+        ParticleSystem _motes;
         SECTR_PointSource _loop;
         SlimeEmotions _emo;
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
         PlayerRadAbsorber _absorber;
-        float _factor = 1f, _nextExpand, _expandedUntil, _fallbackTick;
+        float _factor = 1f, _nextExpand, _expandedUntil, _fallbackTick, _phase;
 
         void Start()
         {
@@ -100,10 +101,18 @@ namespace ClassicSlimes
             _calm = GetComponent<CalmedByWaterSpray>();
             _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale);
             _core = MakeCore();
+            // glowing green motes drifting up inside the aura
+            _motes = Gfx.Sparkles("RadMotes", transform, new Vector3(0f, 0.45f, 0f), Visuals.RadMoteMat,
+                new Color(0.75f, 1f, 0.40f, 1f), new Color(0.25f, 1f, 0.30f, 1f), 7f, 1.8f, 0.05f, 0.13f, 1.05f, 20, 0.12f);
+            if (_motes != null) { try { var mm = _motes.main; mm.gravityModifierMultiplier = -0.05f; } catch { } }
+            _phase = U.Rand(0f, 10f);
             All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.RadAura);
             _nextExpand = Time.time + Delay();
         }
+
+        /// <summary>Dev / tests: start the SR1 expansion (x1.5 for 3 + 10 s) now.</summary>
+        public void ForceExpand() { _nextExpand = 0f; _expandedUntil = 0f; }
 
         float Delay() => Mathf.Lerp(30f, 180f, 1f - U.Agitation(_emo));
 
@@ -122,28 +131,34 @@ namespace ClassicSlimes
             {
                 _expandedUntil = Time.time + ExpandingTime + ExpandedTime;
                 _nextExpand = _expandedUntil + Delay();
+                if (_motes != null && !held) { try { _motes.Emit(14); } catch { } }   // puff of radiation as it swells
             }
             float target = calmed ? 0f : (Time.time < _expandedUntil ? ExpandFactor : 1f);
             float rate = (target < 1f || _factor < 1f) ? 1f / CalmingTime : (ExpandFactor - 1f) / ExpandingTime;
             _factor = Mathf.MoveTowards(_factor, target, rate * dt);
 
             bool show = !held && _factor > 0.02f;
+            // slow "breathing" of the aura (per slime phase), on top of the SR1 expansion
+            float pulse = 1f + 0.035f * Mathf.Sin((Time.time + _phase) * 2.4f);
             if (_aura != null)
             {
                 if (_aura.activeSelf != show) _aura.SetActive(show);
-                if (show) _aura.transform.localScale = Vector3.one * (AuraScale * _factor);
+                if (show) _aura.transform.localScale = Vector3.one * (AuraScale * _factor * pulse);
             }
             if (_core != null)
             {
                 if (_core.activeSelf != show) _core.SetActive(show);
-                if (show) _core.transform.localScale = Vector3.one * (AuraScale * CoreRatio * Mathf.Max(_factor, 0.4f));
+                if (show) _core.transform.localScale = Vector3.one * (AuraScale * CoreRatio * Mathf.Max(_factor, 0.4f) * pulse);
             }
+            Gfx.SetEmitting(_motes, show);
             Snd.SetPlaying(_loop, show);
 
             if (!show || !Cfg.RadAuraDamagesPlayer.Value) return;
-            float radius = AuraScale * _factor * transform.lossyScale.x;
+            // AuraScale is the DIAMETER of the (unit-diameter) aura sphere: irradiate only inside what is drawn
+            // (it used to be the radius -> the player got rads up to 3.6 m away from a 1.6 m aura)
+            float radius = 0.5f * AuraScale * _factor * transform.lossyScale.x;
             var center = transform.position + Vector3.up * (0.5f * transform.lossyScale.y);
-            if (U.DistToPlayer(center) > radius + 0.4f) return;
+            if (U.DistToPlayer(center) > radius + 0.35f) return;
             if (_absorber == null)
             {
                 var p = U.Player;

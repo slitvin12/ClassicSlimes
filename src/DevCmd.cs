@@ -15,7 +15,7 @@ namespace ClassicSlimes
     /// Developer hooks (only with UserData/ClassicSlimes/diag.enabled): write commands into
     /// UserData/ClassicSlimes/cmd.txt, they are executed on the main thread and the file is deleted.
     /// gallery | clear | qs [seconds] | glint | ghost | glitch | time hour | lineup [dist] [seconds] | kill
-    /// locs | goto group|location [x y z] | census | hp
+    /// locs | goto group|location [x y z] | census | hp | rad [amount] | radx (expand every rad aura now)
     /// </summary>
     public static class DevCmd
     {
@@ -100,6 +100,7 @@ namespace ClassicSlimes
                 case "vac": Vac(a.Length < 2 || a[1] != "on"); break;
                 case "domes": Domes(); break;
                 case "dome": Visuals.DomeStyle = (int)F(a, 1, 0f); RadSlime.RestyleAll(); break;
+                case "radx": foreach (var r in RadSlime.All) if (r != null) r.ForceExpand(); break;
                 case "texdump": TexDump(a[1], a.Length > 2 ? a[2] : "_MainTex"); break;
                 case "glitchface":
                     {

@@ -334,6 +334,48 @@ namespace ClassicSlimes
             return m;
         }
 
+        /// <summary>
+        /// The gold/pink slime bodies scatter light through SR2's warm skin-like diffusion profile, which tinted the chrome
+        /// pink and lifted its blacks to maroon. Rock/crystal slimes use a neutral one: copy that (exact hash values).
+        /// </summary>
+        static void NeutralScatter(Material m)
+        {
+            foreach (var n in new[] { "slimeRockBase", "slimeCrystalBase", "slimePhosphorBase" })
+            {
+                var src = Mat.Find(n);
+                if (src == null || !src.HasProperty("_DiffusionProfile")) continue;
+                m.SetFloat("_DiffusionProfile", src.GetFloat("_DiffusionProfile"));
+                if (src.HasProperty("_DiffusionProfile_Asset")) m.SetVector("_DiffusionProfile_Asset", src.GetVector("_DiffusionProfile_Asset"));
+                return;
+            }
+        }
+
+        public static Material QsChargedMat;
+
+        /// <summary>Overcharged quicksilver: electric-blue chrome with SR2's hyper-slime spark fresnel (textures from the hyper ringtail).</summary>
+        static Material QsCharged(Material body)
+        {
+            var c = new Material(body) { name = "ClassicSlimes_QuicksilverCharged", hideFlags = HideFlags.DontUnloadUnusedAsset };
+            c.Tx("_CubemapOverride", Res.Tex("matcap_mercury_charged", false, false));
+            var hyper = Mat.Find("HyperDefaultRingtailDefault_Body") ?? Mat.Find("slimeHyperBase");
+            var fres = hyper != null && hyper.HasProperty("_HyperFresnelNoise") ? hyper.GetTexture("_HyperFresnelNoise") : null;
+            var sparks = hyper != null && hyper.HasProperty("_HyperSparksNoise") ? hyper.GetTexture("_HyperSparksNoise") : null;
+            fres ??= GameTex("HyperSlimeFX_03"); sparks ??= GameTex("HyperSlimeFX_02");
+            if (fres != null && sparks != null)
+            {
+                c.Tx("_HyperFresnelNoise", fres); c.Tx("_HyperSparksNoise", sparks);
+                if (hyper != null && hyper.HasProperty("_HyperDashGradient")) c.Tx("_HyperDashGradient", hyper.GetTexture("_HyperDashGradient"));
+                c.Kw("_ENABLEHYPEREFFECT_ON", true); c.Flt("_EnableHyperEffect", 1f);
+                c.Col("_HyperFresnelColor", new Color(0.3f, 0.78f, 1f, 0f));
+                c.Flt("_HyperBodyColorAlbedoIntensity", 1f);
+                c.Flt("_HyperFresnelIntensity", 1.6f);
+            }
+            else ClassicSlimesMod.Log.Warning("Quicksilver charge: no hyper-slime textures");
+            Mat.Track(c);
+            Mats["QuicksilverCharged"] = c;
+            return c;
+        }
+
         static bool RayTri(Vector3 o, Vector3 d, Vector3 a, Vector3 b, Vector3 c, out float t)
         {
             t = 0f;
@@ -356,12 +398,20 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1: SR/AMP/Slime/Body/Matcap Stripe with silver_sphere matcap -> SR2 gold slime matcap feature with SR1's silver matcap
+            // SR1: SR/AMP/Slime/Body/Matcap Stripe with a silver matcap -> SR2 gold slime matcap feature. In SR2's shader the
+            // matcap replaces the albedo and a slime dome mostly samples its upper half, so SR1's soft silver_sphere read as
+            // porcelain: a generated high-contrast chrome matcap (dark horizon band, white studio windows; tools/mkqsmatcap.py)
+            // makes it liquid mercury.
             var m = BodyMat("Quicksilver", s, "slimeGoldBase", "slimePinkBase");
             if (m != null)
             {
-                m.Tx("_CubemapOverride", Res.Tex("silver_sphere", false, false));
+                m.Tx("_CubemapOverride", Res.Tex("matcap_mercury", false, false));
                 m.Flt("_EnableMatcap", 1f);
+                m.Flt("_OverrideBlend", 1f);
+                m.Flt("_BodyLightingContribution", 0.6f);   // mostly reflection, a little scene light (day/night)
+                m.Flt("_GlossPower", 0.3f);                 // full gloss put orange point-light dots on the chrome
+                NeutralScatter(m);
+                QsChargedMat = QsCharged(m);
             }
             try
             {
