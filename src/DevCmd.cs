@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using HarmonyLib;
 using Il2Cpp;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using Il2CppMonomiPark.SlimeRancher.Slime.SquashWobble;
 using Il2CppMonomiPark.SlimeRancher.Player;
 using Il2CppMonomiPark.SlimeRancher.Player.CharacterController;
 using Il2CppMonomiPark.SlimeRancher.SceneManagement;
@@ -16,6 +18,7 @@ namespace ClassicSlimes
     /// UserData/ClassicSlimes/cmd.txt, they are executed on the main thread and the file is deleted.
     /// gallery | clear | qs [seconds] | glint | ghost | glitch | time hour | lineup [dist] [seconds] | kill
     /// locs | goto group|location [x y z] | census | hp | rad [amount] | radx (expand every rad aura now)
+    /// fx name [scale] [dist] | gtex mat prop gameTex | dprof mat srcMat | qsdash | gblink | gburst [sec] | gmask i|off [flash]
     /// </summary>
     public static class DevCmd
     {
@@ -23,8 +26,18 @@ namespace ClassicSlimes
         static readonly List<(Rigidbody rb, float until)> _frozen = new();
         static readonly List<(Transform t, Vector3 a, Vector3 b, float t0, float dur)> _sweeps = new();
 
+        static readonly List<(Transform t, Rigidbody rb, float until, float next)> _tracks = new();
+
         public static void Tick()
         {
+            for (int i = _tracks.Count - 1; i >= 0; i--)
+            {
+                var k = _tracks[i];
+                if (k.t == null || Time.time > k.until) { _tracks.RemoveAt(i); continue; }
+                if (Time.time < k.next) continue;
+                _tracks[i] = (k.t, k.rb, k.until, Time.time + 0.25f);
+                try { Track(k.t, k.rb); } catch (Exception e) { _tracks.RemoveAt(i); L("track: " + e.Message); }
+            }
             for (int i = _sweeps.Count - 1; i >= 0; i--)
             {
                 var s = _sweeps[i];
@@ -202,6 +215,198 @@ namespace ClassicSlimes
                             $"phasing={qs.Phasing} hunger={U.Hunger(q.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeEmotions>()):0.00} dist={(q.transform.position - cam.transform.position).magnitude:0.0}"));
                         break;
                     }
+                case "fx":   // fx <name> [scale] [dist]: play a game FX prefab in front of the camera
+                    {
+                        var cam = Camera.main; if (cam == null) break;
+                        var go = Fx.Play(a[1], cam.transform.position + cam.transform.forward * F(a, 3, 2.5f), F(a, 2, 1f));
+                        L($"fx {a[1]}: " + (go != null ? "ok" : "not found"));
+                        break;
+                    }
+                case "gtex":   // gtex <matKey> <prop> <game texture>
+                    {
+                        var t = Visuals.GameTex(a[3]);
+                        foreach (var m in Tune(a[1])) m.SetTexture(a[2], t);
+                        L($"gtex {a[3]}: " + (t != null ? t.width + "x" + t.height : "not found"));
+                        break;
+                    }
+                case "dprof":   // dprof <matKey> <source material>: copy SR2's diffusion profile (subsurface tint)
+                    {
+                        var src = Mat.Find(a[2]);
+                        if (src == null || !src.HasProperty("_DiffusionProfile")) { L("dprof: no " + a[2]); break; }
+                        foreach (var m in Tune(a[1]))
+                        {
+                            m.SetFloat("_DiffusionProfile", src.GetFloat("_DiffusionProfile"));
+                            if (src.HasProperty("_DiffusionProfile_Asset")) m.SetVector("_DiffusionProfile_Asset", src.GetVector("_DiffusionProfile_Asset"));
+                        }
+                        break;
+                    }
+                case "qsdash":   // nearest quicksilver dashes now
+                    {
+                        var cam = Camera.main; var q = cam != null ? Nearest<QuicksilverSlime>(cam.transform.position) : null;
+                        if (q != null) q.GetComponent<QuicksilverSlime>().DevDash(); else L("no quicksilver slime");
+                        break;
+                    }
+                case "gblink":   // nearest glitch blink-teleports now
+                    {
+                        var cam = Camera.main; var g = cam != null ? Nearest<GlitchSlime>(cam.transform.position) : null;
+                        if (g != null) g.GetComponent<GlitchSlime>().Blink(true); else L("no glitch slime");
+                        break;
+                    }
+                case "gburst": GlitchSlime.TriggerBurst(F(a, 1, 0.5f)); break;
+                case "rdist":   // rdist <template material|off> [diameter relative to the aura]: extra sphere in every rad aura (key RadDist)
+                    RadSlime.DevExtra(a[1], F(a, 2, 0.98f)); break;
+                case "dspin": Visuals.DomeSpin = F(a, 1, 9f); break;
+                case "rq": foreach (var m in Tune(a[1])) m.renderQueue = (int)F(a, 2, -1f); break;
+                case "bodymat":   // bodymat <def> <template|key|=key|off> [key]: body material of the live slimes of a type
+                    L("bodymat " + Experiments.BodyMat(a[1], a[2], a.Length > 3 ? a[3] : a[1] + "Body2")); break;
+                case "bshell":   // bshell <def> <template|key|=key|off> [key] [inflate] [rq] [facets]: elastic shell from the body mesh
+                    L("bshell " + Experiments.Shell(a[1], a[2], a.Length > 3 ? a[3] : a[1] + "Shell", F(a, 4, 0.02f), (int)F(a, 5, 0f), (int)F(a, 6, 0f))); break;
+                case "qspiral":   // qspiral <template|key|=key|off> [key] [rq]: inner 3D spiral in the live quantum slimes
+                    L("qspiral " + Experiments.QSpiral(a[1], a.Length > 2 ? a[2] : "QSpiral", (int)F(a, 3, 0f))); break;
+                case "qsp":   // qsp r0 r1 turns tube z y cup startDeg cw dome: spiral shape (then qspiral default again)
+                    Spiral3D.R0 = F(a, 1, Spiral3D.R0); Spiral3D.R1 = F(a, 2, Spiral3D.R1); Spiral3D.Turns = F(a, 3, Spiral3D.Turns);
+                    Spiral3D.Tube = F(a, 4, Spiral3D.Tube); Spiral3D.Z = F(a, 5, Spiral3D.Z); Spiral3D.Y = F(a, 6, Spiral3D.Y);
+                    Spiral3D.Cup = F(a, 7, Spiral3D.Cup); Spiral3D.StartDeg = F(a, 8, Spiral3D.StartDeg);
+                    Spiral3D.Clockwise = F(a, 9, Spiral3D.Clockwise ? 1f : 0f) > 0.5f;
+                    Spiral3D.Dome = F(a, 10, Spiral3D.Dome);
+                    L("qsp " + Spiral3D.Info); break;
+                case "gflee":   // nearest glitch runs away now
+                    {
+                        var cam = Camera.main; var g = cam != null ? Nearest<GlitchSlime>(cam.transform.position) : null;
+                        if (g != null) g.GetComponent<GlitchSlime>().StartFlee(); else L("no glitch slime");
+                        break;
+                    }
+                case "gvac":   // gvac <on|off|throw> [speed]: fake vacpack on the nearest glitch (caught -> released / shot away)
+                    {
+                        var cam = Camera.main; var g = cam != null ? Nearest<GlitchSlime>(cam.transform.position) : null;
+                        var v = g != null ? g.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>() : null;
+                        if (v == null) { L("no glitch slime"); break; }
+                        string mode = a.Length > 1 ? a[1] : "on";
+                        var rb = g.GetComponent<Rigidbody>();
+                        if (mode == "on") { v.SetHeld(true); if (rb != null) rb.isKinematic = true; }   // no vac joint here: pin it instead
+                        else
+                        {
+                            if (rb != null) rb.isKinematic = false;
+                            v.SetHeld(false);
+                            if (mode == "throw")
+                            {
+                                v.Launch(Il2CppMonomiPark.SlimeRancher.Vacuumable.LaunchSource.PLAYER);
+                                var dir = g.transform.position - cam.transform.position; dir.y = 0f;
+                                if (rb != null) rb.linearVelocity = dir.normalized * F(a, 2, 10f) + Vector3.up * 3f;
+                            }
+                        }
+                        L($"gvac {mode}: held {v.IsHeld()} launched {v.IsLaunched()}");
+                        break;
+                    }
+                case "qnophase":   // qnophase [off]: no quantum hologram phases / glitch twitches (steady screenshots)
+                    QuantumSlime.DevNoPhase = a.Length < 2 || a[1] != "off"; L("qnophase " + QuantumSlime.DevNoPhase); break;
+                case "qspot":   // qspot x y z [size]: quantum spiral centre (body heights from the body centre) and size
+                    {
+                        QuantumSlime.SpiralOfs = new Vector3(F(a, 1, QuantumSlime.SpiralOfs.x), F(a, 2, QuantumSlime.SpiralOfs.y), F(a, 3, QuantumSlime.SpiralOfs.z));
+                        QuantumSlime.SpiralSize = F(a, 4, QuantumSlime.SpiralSize);
+                        string info = "";
+                        foreach (var q in UnityEngine.Object.FindObjectsOfType<QuantumSlime>()) { q.ReplaceSpiral(); info = q.SpiralInfo(); }
+                        L($"qspot {QuantumSlime.SpiralOfs} size {QuantumSlime.SpiralSize} | {info}");
+                        break;
+                    }
+                case "tree":   // tree <def> [depth]: transform hierarchy of the nearest slime of a type
+                    {
+                        var go = NearestDef(a[1]);
+                        if (go == null) { L("tree: no " + a[1]); break; }
+                        Tree(go.transform, 0, (int)F(a, 2, 3f));
+                        break;
+                    }
+                case "mjelly":   // mjelly [gain lean stretch freq damp inertia]: glass-slime squash & stretch (+ info of the nearest mosaic / quantum)
+                    {
+                        JellyRig.Gain = F(a, 1, JellyRig.Gain); JellyRig.MaxLean = F(a, 2, JellyRig.MaxLean); JellyRig.MaxStretch = F(a, 3, JellyRig.MaxStretch);
+                        JellyRig.Freq = F(a, 4, JellyRig.Freq); JellyRig.Damp = F(a, 5, JellyRig.Damp); JellyRig.Inertia = F(a, 6, JellyRig.Inertia);
+                        var cam = Camera.main;
+                        var ms = cam != null ? Nearest<MosaicSlime>(cam.transform.position) : null;
+                        var qs = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
+                        L($"mjelly gain {JellyRig.Gain} lean {JellyRig.MaxLean} stretch {JellyRig.MaxStretch} freq {JellyRig.Freq} damp {JellyRig.Damp} inertia {JellyRig.Inertia}");
+                        L("mjelly mosaic: " + (ms != null ? ms.GetComponent<MosaicSlime>().JellyInfo() : "-"));
+                        L("mjelly quantum: " + (qs != null ? qs.GetComponent<QuantumSlime>().JellyInfo() : "-"));
+                        break;
+                    }
+                case "track":   // track <def> [seconds]: log position / speed / ground contact of the nearest slime of a type
+                    {
+                        var go = NearestDef(a[1]);
+                        if (go == null) { L("track: no " + a[1]); break; }
+                        _tracks.Add((go.transform, go.GetComponent<Rigidbody>(), Time.time + F(a, 2, 4f), 0f));
+                        break;
+                    }
+                case "mshell":   // mshell on|off: the separate SR1 glass shell renderers of the live mosaic slimes
+                    {
+                        int n = 0;
+                        foreach (var ms in UnityEngine.Object.FindObjectsOfType<MosaicSlime>())
+                            foreach (var r in ms.GetComponentsInChildren<Renderer>(true))
+                                if (r != null && r.gameObject.name.StartsWith("mosaic_shell")) { r.enabled = a.Length < 2 || a[1] != "off"; n++; }
+                        L($"mshell {n} renderers");
+                        break;
+                    }
+                case "mcoat":   // mcoat <template material|off> [key]: second (coat) material on the live mosaic body renderers
+                    {
+                        string key = a.Length > 2 ? a[2] : "MosaicCoat";
+                        Material coat = null;
+                        if (a[1] != "off")
+                        {
+                            coat = Visuals.Mats.TryGetValue(key, out var have) && have != null && a[1] == "keep" ? have : Mat.Clone(key, a[1]);
+                            if (coat == null) { L("mcoat: no " + a[1]); break; }
+                            coat.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                            Visuals.Mats[key] = coat;
+                        }
+                        int n = 0;
+                        foreach (var ms in UnityEngine.Object.FindObjectsOfType<MosaicSlime>())
+                            foreach (var r in ms.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                            {
+                                var mats = r.sharedMaterials;
+                                if (mats == null || mats.Length == 0 || mats[0] == null || !mats[0].name.Contains("MosaicBody")) continue;
+                                r.sharedMaterials = new Il2CppReferenceArray<Material>(coat != null ? new[] { mats[0], coat } : new[] { mats[0] });
+                                n++;
+                            }
+                        L($"mcoat {a[1]} -> {n} renderers ({(coat != null ? coat.shader.name : "-")})");
+                        break;
+                    }
+                case "wobble":   // wobble <def> [x y z]: kick SR2's squash / stretch of the nearest slime of that type
+                    {
+                        var go = NearestDef(a[1]);
+                        var rb = go != null ? go.GetComponentInChildren<RubberBoneEffectShader>() : null;
+                        if (rb == null) { L("wobble: no rubber bone on " + a[1]); break; }
+                        var kick = new Vector3(F(a, 2, 0f), F(a, 3, 3f), F(a, 4, 0f));
+                        rb.AddImpulseForce(kick);
+                        var mj = go.GetComponent<MosaicSlime>(); var qj = go.GetComponent<QuantumSlime>();
+                        var jr = mj != null ? mj.Jelly : qj != null ? qj.Jelly : null;
+                        if (jr != null && jr.Ok) { jr.Kick(kick * 0.3f); L("wobble jelly " + jr.Info()); }
+                        break;
+                    }
+                case "qswirl":   // qswirl [dx dy dz radius turns tip width endDeg cw uv]: re-bake the quantum spiral (+ qswirl*.png)
+                    {
+                        Swirl.Dir = new Vector3(F(a, 1, Swirl.Dir.x), F(a, 2, Swirl.Dir.y), F(a, 3, Swirl.Dir.z));
+                        Swirl.Radius = F(a, 4, Swirl.Radius); Swirl.Turns = F(a, 5, Swirl.Turns); Swirl.Tip = F(a, 6, Swirl.Tip);
+                        Swirl.Width = F(a, 7, Swirl.Width); Swirl.EndDeg = F(a, 8, Swirl.EndDeg);
+                        Swirl.Clockwise = F(a, 9, Swirl.Clockwise ? 1f : 0f) > 0.5f; Swirl.UvSet = (int)F(a, 10, Swirl.UvSet);
+                        var t = Swirl.Bake(Swirl.BodyMesh, true);
+                        if (t != null)
+                            foreach (var m in Tune("Quantum"))
+                            {
+                                m.SetTexture("_ColorMask", t);
+                                m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero);
+                                m.SetFloat("_ColorMaskUV1", Swirl.LastSet);
+                            }
+                        L("qswirl " + Swirl.Info);
+                        break;
+                    }
+                case "gtrail":   // gtrail y1 y2 ytrail ypix [time1 w1 time2 w2]: glitch trail layout on the live slimes
+                    GlitchSlime.RibbonY = F(a, 1, GlitchSlime.RibbonY); GlitchSlime.Ribbon2Y = F(a, 2, GlitchSlime.Ribbon2Y);
+                    GlitchSlime.TrailY = F(a, 3, GlitchSlime.TrailY); GlitchSlime.PixelY = F(a, 4, GlitchSlime.PixelY);
+                    GlitchSlime.RibbonTime = F(a, 5, GlitchSlime.RibbonTime); GlitchSlime.RibbonW = F(a, 6, GlitchSlime.RibbonW);
+                    GlitchSlime.Ribbon2Time = F(a, 7, GlitchSlime.Ribbon2Time); GlitchSlime.Ribbon2W = F(a, 8, GlitchSlime.Ribbon2W);
+                    GlitchSlime.DevTrail();
+                    break;
+                case "gmask":   // gmask <0-2 pixel | 3-7 tear | off> [flash]: hold one glitch body mask
+                    GlitchSlime.DevMask = a.Length > 1 && a[1] != "off" ? (int)F(a, 1, 0f) : -1;
+                    GlitchSlime.DevFlash = a.Length > 2 && a[2] == "flash";
+                    break;
                 default: ClassicSlimesMod.Log.Warning("[cmd] unknown: " + l); break;
             }
         }
@@ -238,6 +443,42 @@ namespace ClassicSlimes
             return r;
         }
 
+        /// <summary>The slime / actor of that identifiable type closest to the camera.</summary>
+        static void Tree(Transform t, int depth, int max)
+        {
+            var comps = new List<string>();
+            foreach (var c in t.GetComponents<Component>()) if (c != null && c.TryCast<Transform>() == null) comps.Add(c.GetIl2CppType().Name);
+            L($"tree {new string('.', depth * 2)}{t.name} p {t.localPosition} r {t.localEulerAngles} s {t.localScale} [{string.Join(",", comps)}]");
+            if (depth >= max) { if (t.childCount > 0) L($"tree {new string('.', depth * 2 + 2)}({t.childCount} children)"); return; }
+            for (int i = 0; i < t.childCount; i++) Tree(t.GetChild(i), depth + 1, max);
+        }
+
+        static void Track(Transform t, Rigidbody rb)
+        {
+            var v = rb != null ? rb.velocity : Vector3.zero;
+            string extra = "";
+            var gl = t.GetComponent<GlitchSlime>(); if (gl != null && gl.Fleeing) extra += " FLEE";
+            if (rb != null) extra += $" kin {rb.isKinematic} sleep {rb.IsSleeping()}";
+            var pl = U.Player; extra += pl != null ? $" pl {Vector3.Distance(pl.transform.position, t.position):0.0}" : " pl -";
+            var cam = Camera.main; if (cam != null) extra += $" cam {Vector3.Distance(cam.transform.position, t.position):0.0}";
+            L($"track {t.name} {Time.time:0.00} pos {t.position} hv {new Vector2(v.x, v.z).magnitude:0.0} vy {v.y:0.0} gnd {U.Grounded(t, t.lossyScale.x)} ts {Time.timeScale}{extra}");
+        }
+
+        static GameObject NearestDef(string def)
+        {
+            var cam = Camera.main; if (cam == null) return null;
+            var p = cam.transform.position;
+            GameObject best = null; float bd = float.MaxValue;
+            foreach (var id in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+            {
+                var t = id != null ? id.identType : null;
+                if (t == null || !string.Equals(t.name, def, StringComparison.OrdinalIgnoreCase)) continue;
+                float d = (id.transform.position - p).sqrMagnitude;
+                if (d < bd) { bd = d; best = id.gameObject; }
+            }
+            return best;
+        }
+
         static GameObject Nearest<T>(Vector3 p) where T : Component
         {
             GameObject best = null; float bd = float.MaxValue;
@@ -270,7 +511,7 @@ namespace ClassicSlimes
                 if (Physics.Raycast(pos + Vector3.up * 5f, Vector3.down, out var hit, 20f, ~0, QueryTriggerInteraction.Ignore))
                     pos = hit.point + Vector3.up * 0.55f;
                 var rb = go.GetComponent<Rigidbody>();
-                if (rb != null) { rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
+                if (rb != null) { if (!rb.isKinematic) rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
                 go.transform.position = pos;
                 go.transform.rotation = Quaternion.LookRotation(-fwd, Vector3.up);
             }
@@ -388,7 +629,7 @@ namespace ClassicSlimes
             var up = cam.transform.up;
             var pos = p + fwd * dist + up * dy;
             var rb = best.GetComponent<Rigidbody>();
-            if (rb != null) { rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
+            if (rb != null) { if (!rb.isKinematic) rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
             best.transform.position = pos;
             best.transform.rotation = Quaternion.LookRotation(-fwd, up) * Quaternion.Euler(0f, yaw, 0f);
             L($"pose {def} at {pos}");

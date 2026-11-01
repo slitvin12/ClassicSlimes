@@ -40,6 +40,84 @@ namespace ClassicSlimes
         }
     }
 
+    /// <summary>
+    /// CottonLibrary puts every custom slime and largo into SlimeDefinitions.Slimes twice, and the game logs
+    /// "An item with the same key has already been added" for each duplicate on every RefreshIndexes call
+    /// (~2100 errors per launch). Duplicate entries are dropped before the index is rebuilt.
+    /// </summary>
+    [HarmonyPatch(typeof(SlimeDefinitions), nameof(SlimeDefinitions.RefreshIndexes))]
+    static class SlimeIndexDedup
+    {
+        public static int Removed;
+        static bool _failed;
+
+        static void Prefix(SlimeDefinitions __instance)
+        {
+            if (_failed) return;
+            try
+            {
+                var arr = __instance.Slimes;
+                if (arr == null || arr.Length < 2) return;
+                var seen = new HashSet<IntPtr>();
+                List<SlimeDefinition> keep = null;
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    var d = arr[i];
+                    if (d == null || seen.Add(d.Pointer)) { keep?.Add(d); continue; }
+                    if (keep == null) { keep = new List<SlimeDefinition>(arr.Length); for (int j = 0; j < i; j++) keep.Add(arr[j]); }
+                }
+                if (keep == null) return;
+                if (Removed == 0) ClassicSlimesMod.Log.Msg($"[defs] dropped {arr.Length - keep.Count} duplicate SlimeDefinitions.Slimes entries (double registration) - further cases are silent");
+                Removed += arr.Length - keep.Count;
+                __instance.Slimes = Gc.Array(keep);
+            }
+            catch (Exception e) { _failed = true; ClassicSlimesMod.Log.Warning("[defs] dedup failed: " + e.Message); }
+        }
+    }
+
+    /// <summary>
+    /// CottonLibrary's largo builder reads _SloomberTop/Middle/BottomColor from both parents' body materials for every
+    /// largo; the SR2 body shader has no _SloomberMiddleColor, so each largo logged two Material.GetColor errors.
+    /// Same lookup, guarded by HasProperty (missing colours come back as zero, like before).
+    /// </summary>
+    [HarmonyPatch]
+    static class SloomberPaletteGuard
+    {
+        static MethodBase _target;
+
+        static bool Prepare()
+        {
+            try { _target = AccessTools.Method(typeof(CottonLibrary.Library), "INTERNAL_GetSloomberPalette"); } catch { _target = null; }
+            return _target != null;
+        }
+
+        static MethodBase TargetMethod() => _target;
+
+        static bool Prefix(SlimeAppearance __0, ref SlimeAppearance.Palette __result)
+        {
+            try
+            {
+                Material mat = null;
+                var st = __0 != null ? __0._structures : null;
+                if (st != null)
+                    foreach (var s in st)
+                        if (s?.Element != null && s.Element.Type == SlimeAppearanceElement.ElementType.BODY && s.DefaultMaterials != null && s.DefaultMaterials.Count > 0)
+                        { mat = s.DefaultMaterials[0]; break; }
+                __result = new SlimeAppearance.Palette
+                {
+                    Ammo = new Color32(255, 255, 255, 255),
+                    Top = Get(mat, "_SloomberTopColor"),
+                    Middle = Get(mat, "_SloomberMiddleColor"),
+                    Bottom = Get(mat, "_SloomberBottomColor"),
+                };
+                return false;
+            }
+            catch { return true; }
+        }
+
+        static Color Get(Material m, string prop) => m != null && m.HasProperty(prop) ? m.GetColor(prop) : default;
+    }
+
     /// <summary>Water (SR2 CalmedByWaterSpray) pops quantum ghosts, fizzles mosaic glints and reveals glitch slimes.</summary>
     [HarmonyPatch(typeof(CalmedByWaterSpray), nameof(CalmedByWaterSpray.AddLiquid))]
     static class WaterPatch
@@ -73,6 +151,34 @@ namespace ClassicSlimes
                 else if (otherId.IsPlort) qs.Overcharge(15f);
             }
             catch { }
+        }
+    }
+
+    /// <summary>Quicksilver slimes never hop: SR2's random hopping is skipped (QuicksilverSlime's runner drives them).</summary>
+    [HarmonyPatch(typeof(SlimeRandomMove), nameof(SlimeRandomMove.Action))]
+    static class QsNoHopMove
+    {
+        static bool Prefix(SlimeRandomMove __instance)
+        {
+            try { return QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.ContainsKey(__instance.Pointer); }
+            catch { return true; }
+        }
+    }
+
+    /// <summary>...and instead of leaping at food they race to it.</summary>
+    [HarmonyPatch(typeof(GotoConsumable), nameof(GotoConsumable.Action))]
+    static class QsNoHopFood
+    {
+        static bool Prefix(GotoConsumable __instance)
+        {
+            try
+            {
+                if (QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.TryGetValue(__instance.Pointer, out var qs) || qs == null) return true;
+                var t = __instance._target;
+                if (t != null) qs.RunTo(t.transform.position);
+                return false;
+            }
+            catch { return true; }
         }
     }
 

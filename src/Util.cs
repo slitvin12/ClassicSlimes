@@ -492,7 +492,9 @@ namespace ClassicSlimes
 
         public static bool Grounded(Transform t, float scale)
         {
-            return Physics.Raycast(t.position + Vector3.up * (0.35f * scale), Vector3.down, 0.75f * scale, GroundMask, QueryTriggerInteraction.Ignore);
+            // the slime root sits about half a body above the ground (the appearance hangs below it): a ray from just
+            // above the root to a little below the bottom of the body (the old 0.35 up / 0.75 down never reached it)
+            return Physics.Raycast(t.position + Vector3.up * (0.1f * scale), Vector3.down, 0.85f * scale, GroundMask, QueryTriggerInteraction.Ignore);
         }
 
         /// <summary>Random reachable point on the ground around a position (used for quantum ghosts).</summary>
@@ -502,6 +504,47 @@ namespace ClassicSlimes
             {
                 float ang = Rand(0f, Mathf.PI * 2f), r = Rand(minR, maxR);
                 var probe = around + new Vector3(Mathf.Cos(ang) * r, 2.5f, Mathf.Sin(ang) * r);
+                if (Physics.Linecast(around + Vector3.up * 0.6f, probe, GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                if (!Physics.Raycast(probe, Vector3.down, out var hit, 7f, GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                if (hit.normal.y < 0.6f) continue;
+                point = hit.point;
+                return true;
+            }
+            point = around;
+            return false;
+        }
+
+        /// <summary>Bounds of a skinned mesh (rest pose, from its mesh) in the local space of a root transform.</summary>
+        public static Bounds RootBounds(Transform root, SkinnedMeshRenderer r)
+        {
+            var mesh = r.sharedMesh;
+            if (mesh == null)
+            {
+                var wb = r.bounds;
+                var lb = new Bounds(root.InverseTransformPoint(wb.center), Vector3.zero);
+                lb.Encapsulate(root.InverseTransformPoint(wb.min)); lb.Encapsulate(root.InverseTransformPoint(wb.max));
+                return lb;
+            }
+            var mb = mesh.bounds;
+            var b = new Bounds(root.InverseTransformPoint(r.transform.TransformPoint(mb.center)), Vector3.zero);
+            for (int i = 0; i < 8; i++)
+            {
+                var c = mb.center + Vector3.Scale(mb.extents, new Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f, (i & 4) == 0 ? -1f : 1f));
+                b.Encapsulate(root.InverseTransformPoint(r.transform.TransformPoint(c)));
+            }
+            return b;
+        }
+
+        /// <summary>Random reachable ground point roughly in a direction (spread in degrees) from a position.</summary>
+        public static bool GroundPointToward(Vector3 around, Vector3 dir, float minR, float maxR, float spreadDeg, out Vector3 point)
+        {
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-4f) return GroundPoint(around, minR, maxR, out point);
+            dir.Normalize();
+            for (int i = 0; i < 8; i++)
+            {
+                var d = Quaternion.Euler(0f, Rand(-spreadDeg, spreadDeg), 0f) * dir;
+                var probe = around + d * Rand(minR, maxR) + Vector3.up * 2.5f;
                 if (Physics.Linecast(around + Vector3.up * 0.6f, probe, GroundMask, QueryTriggerInteraction.Ignore)) continue;
                 if (!Physics.Raycast(probe, Vector3.down, out var hit, 7f, GroundMask, QueryTriggerInteraction.Ignore)) continue;
                 if (hit.normal.y < 0.6f) continue;

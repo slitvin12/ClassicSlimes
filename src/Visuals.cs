@@ -53,10 +53,11 @@ namespace ClassicSlimes
             try { d.RadiantBase = null; d.RadiantLargo0 = null; d.RadiantLargo1 = null; } catch { }
         }
 
-        static void SetBodyMaterial(SlimeAppearance app, Material m)
+        /// <summary>Body material; an optional second one is drawn over the same mesh (SR2 does this for the radiant aura).</summary>
+        static void SetBodyMaterial(SlimeAppearance app, Material m, Material second = null)
         {
             if (m == null) return;
-            app.Structures[0].DefaultMaterials = new Il2CppReferenceArray<Material>(new[] { m });
+            app.Structures[0].DefaultMaterials = new Il2CppReferenceArray<Material>(second != null ? new[] { m, second } : new[] { m });
         }
 
         static int FaceIndex(SlimeAppearance app)
@@ -174,13 +175,24 @@ namespace ClassicSlimes
 
         // ------------------------------------------------------------------ Quantum
         /// <summary>
-        /// SR1 quantum: warm yellow body with lighter swirl ("@") marks and yellow eyes. SR2: the multi-colour body shader
-        /// with a generated swirl mask (red channel = swirls) on the hyper material for a pale holographic rim.
+        /// SR1 quantum: a little see-through golden jelly with a lighter spiral band inside, small orange eyes.
+        /// Cfg.QuantumJelly: glass body (QuantumJellyMat) + 3D spiral inside (QuantumSlime). Off (and largos): the
+        /// multi-colour body shader with a generated swirl mask (red channel = swirls) on the hyper material.
         /// </summary>
         public static void Quantum(SlimeSpec s)
         {
             ClearRadiant(s.Def);
             var app = App(s);
+            // SR1 look: see-through golden jelly, the spiral floats inside it (added by QuantumSlime)
+            var jelly = Cfg.QuantumJelly.Value ? QuantumJellyMat() : null;
+            if (jelly != null)
+            {
+                SetBodyMaterial(app, jelly);
+                try { var f = QuantumFace(app._face); if (f != null) app._face = f; }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning("Quantum face: " + e.Message); }
+                Behaviours.Add<QuantumSlime>(s.Def);
+                return;
+            }
             var m = BodyMat("Quantum", s, "HyperDefaultRingtailDefault_Body", "slimeRingtailBase", "slimeTwinBase", "slimePinkBase");
             if (m != null)
             {
@@ -188,10 +200,30 @@ namespace ClassicSlimes
                 m.Kw("_ENABLETWINEFFECT_ON", false); m.Flt("_EnableTwinEffect", 0f);
                 m.Kw("_ENABLEVORTEX_ON", false);
                 m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
-                m.Tx("_ColorMask", Res.Tex("msk_quantumSpiral", true, false) ?? Gfx.SwirlMask);   // SR1 quantumStatic spiral
-                m.SetTextureScale("_ColorMask", Gfx.SwirlScale);
-                m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
-                m.Flt("_ColorMaskUV1", 0f);
+                // ONE round SR1 spiral, baked into the UV layout of the body mesh (Swirl); fallback: the flat SR1 mask
+                Texture2D swirl = null;
+                try
+                {
+                    var smr = app.Structures[0].Element.Prefabs[0].GetComponent<SkinnedMeshRenderer>();
+                    Swirl.BodyMesh = smr != null ? smr.sharedMesh : null;
+                    swirl = Swirl.Bake(Swirl.BodyMesh);
+                }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning("Quantum swirl: " + e.Message); }
+                if (swirl != null)
+                {
+                    m.Tx("_ColorMask", swirl);
+                    m.SetTextureScale("_ColorMask", Vector2.one);
+                    m.SetTextureOffset("_ColorMask", Vector2.zero);
+                    m.Flt("_ColorMaskUV1", Swirl.LastSet);
+                }
+                else
+                {
+                    ClassicSlimesMod.Log.Warning("Quantum swirl not baked: " + Swirl.Info);
+                    m.Tx("_ColorMask", Res.Tex("msk_quantumSpiral", true, false) ?? Gfx.SwirlMask);   // SR1 quantumStatic spiral
+                    m.SetTextureScale("_ColorMask", Gfx.SwirlScale);
+                    m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
+                    m.Flt("_ColorMaskUV1", 0f);
+                }
                 m.Col("_RedTopColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedMiddleColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedBottomColor", new Color(1f, 0.94f, 0.58f));
                 m.Col("_GreenTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_GreenMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_GreenBottomColor", new Color(1f, 0.65f, 0.25f));
                 m.Col("_BlueTopColor", new Color(1f, 0.92f, 0.50f)); m.Col("_BlueMiddleColor", new Color(1f, 0.82f, 0.35f)); m.Col("_BlueBottomColor", new Color(1f, 0.65f, 0.25f));
@@ -205,6 +237,69 @@ namespace ClassicSlimes
             try { var f = QuantumFace(app._face); if (f != null) app._face = f; }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("Quantum face: " + e.Message); }
             Behaviours.Add<QuantumSlime>(s.Def);
+        }
+
+        static Material _qJelly, _qSpiral;
+        /// <summary>Opacity of the quantum glass jelly (SR1: a little see-through).</summary>
+        public static float QuantumAlpha = 0.95f;
+        /// <summary>Additive (the shader doubles it): a light-yellow band over the golden jelly, not a glowing line.</summary>
+        public static Color QuantumSpiralTint = new(0.35f, 0.3f, 0.14f, 0.5f);
+        /// <summary>The quantum glass body if it was made (never creates it).</summary>
+        public static Material QuantumJellyMade => _qJelly;
+
+        /// <summary>
+        /// SR1 quantum: see-through golden jelly with a spiral inside. SR2's slime body shaders have no usable
+        /// transparent pass (the puddle body is either opaque or invisible), so the body gets SR2's lab glass
+        /// (SimpleGlass): golden glass with a warm reflection over the whole body (white reflection map); a little
+        /// refraction blur softens what is behind it into jelly. Even at full opacity the glass shows the refracted
+        /// background, and everything behind it (the spiral too) gets that blur, so the spiral is drawn after the glass
+        /// (QuantumSpiralMat). The glass can't wobble in its shader: QuantumSlime's JellyRig squashes / stretches the
+        /// whole slime instead.
+        /// </summary>
+        public static Material QuantumJellyMat()
+        {
+            if (_qJelly != null) return _qJelly;
+            var m = Mat.Clone("QuantumJelly", "envLabGlass", "SimpleGlass");
+            if (m == null) return null;
+            m.Col("_Color", new Color(1f, 0.78f, 0.04f, 0f));
+            m.Flt("_Opacity", QuantumAlpha);
+            m.Flt("_Metallic", 0f);
+            m.Flt("_Smoothness", 0.8f);
+            m.Flt("_NormalStrength", 0.2f);
+            m.Flt("_DistortionStrength", 2f);
+            m.Flt("_DistortionBlur", 0.05f);
+            m.Flt("_FresnelDistortionBlur", 0.15f);
+            m.Tx("_Reflection", Gfx.Generated("qSpiralBand", 4, 4, (x, y) => Color.white, false));
+            m.Col("_ReflectionTint", new Color(1f, 0.55f, 0f, 0f));
+            m.Flt("_ReflectionIntensity", 18f);
+            m.Flt("_ReflectionFresnelPower", 0.6f);
+            m.Flt("_ReflectionFresnelScale", 1f);
+            m.Flt("_BaseMapAlpha", 0f);
+            m.Flt("_BaseMapColor", 0f);
+            // single-sided glass
+            m.Kw("_DOUBLESIDED_ON", false);
+            m.Flt("_DoubleSidedEnable", 0f);
+            m.Flt("_CullMode", 2f); m.Flt("_CullModeForward", 2f); m.Flt("_TransparentCullMode", 2f);
+            _qJelly = Keep(m, "QuantumJelly");
+            Mats["Quantum"] = _qJelly;
+            return _qJelly;
+        }
+
+        /// <summary>SR1 quantum spiral band: light yellow, additive, drawn after the glass body (not blurred by it;
+        /// opaque things in front, the face included, still hide it).</summary>
+        public static Material QuantumSpiralMat
+        {
+            get
+            {
+                if (_qSpiral != null) return _qSpiral;
+                var m = Mat.Clone("QuantumSpiral", "Gold Slime Sparkle");
+                if (m == null) return null;
+                m.Tx("_MainTex", Gfx.Generated("qSpiralBand", 4, 4, (x, y) => Color.white, false));
+                m.Col("_TintColor", QuantumSpiralTint);
+                m.renderQueue = 3050;
+                _qSpiral = Keep(m, "QuantumSpiral");
+                return _qSpiral;
+            }
         }
 
         public static void QuantumLargo(SlimeDefinition d)
@@ -448,6 +543,8 @@ namespace ClassicSlimes
                 }
             }
             catch (Exception e) { ClassicSlimesMod.Log.Error("Quicksilver structures: " + e); }
+            try { var f = QuicksilverFace(app._face); if (f != null) app._face = f; }   // SR1: eyes only, no mouth
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("Quicksilver face: " + e.Message); }
             Voices(s, "vo_quicksilver_happy_01", null, null, null);
             Behaviours.Add<QuicksilverSlime>(s.Def);
         }

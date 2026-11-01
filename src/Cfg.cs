@@ -23,6 +23,7 @@ namespace ClassicSlimes
         public static MelonPreferences_Entry<bool> EnableFoods, WildFoods, RadHud, GlitchSR1Face;
         public static MelonPreferences_Entry<float> WildFoodShare, RadRecoveryPerSecond;
         public static MelonPreferences_Entry<int> RadDomeStyle;
+        public static MelonPreferences_Entry<bool> RadHaze, GlitchFlees, QuicksilverRuns, MosaicJelly, QuantumJelly;
 
         public static void Init()
         {
@@ -62,6 +63,11 @@ namespace ClassicSlimes
             RadRecoveryPerSecond = Cat.CreateEntry("RadRecoveryPerSecond", 3f, "Radiation that wears off per second once out of a rad aura");
             RadDomeStyle = Cat.CreateEntry("RadDomeStyle", 0, "Rad aura look: 0 refracting sphere with a soft green edge (SR1), 1 bubble (SR2 icon style), 2 shadow aura, 3 hyper aura, 4 solar shield, 5 dream bubble, 6 fresnel, 7 bubble (particle shader)");
             GlitchSR1Face = Cat.CreateEntry("GlitchSR1Face", true, "Glitch slimes use the SR1 square-pixel face");
+            RadHaze = Cat.CreateEntry("RadHaze", true, "The rad aura boils with SR1-style heat haze (refraction volume inside the dome)");
+            GlitchFlees = Cat.CreateEntry("GlitchFlees", true, "A glitch slime that was caught (its disguise blown) and thrown away runs off in a panic");
+            QuicksilverRuns = Cat.CreateEntry("QuicksilverRuns", true, "Quicksilver slimes never hop: they race along the ground");
+            MosaicJelly = Cat.CreateEntry("MosaicJelly", true, "Mosaic slimes squash and stretch as a whole, so the SR1 glass shell wobbles with the tiles (off: SR2's squash in the body shader, the glass stays rigid)");
+            QuantumJelly = Cat.CreateEntry("QuantumJelly", true, "Quantum slimes are see-through golden jelly with the SR1 spiral inside (off: opaque body with a painted spiral)");
         }
     }
 }

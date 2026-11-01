@@ -93,7 +93,7 @@ namespace ClassicSlimes
             return go;
         }
 
-        static ParticleSystem.MinMaxCurve Range(float a, float b)
+        public static ParticleSystem.MinMaxCurve Range(float a, float b)
         {
             var c = new ParticleSystem.MinMaxCurve(a);
             if (Mathf.Abs(a - b) > 1e-4f) { c.m_Mode = ParticleSystemCurveMode.TwoConstants; c.m_ConstantMin = a; c.m_ConstantMax = b; }
@@ -236,6 +236,46 @@ namespace ClassicSlimes
             return Mathf.Lerp(Mathf.Lerp(a, b, fx), Mathf.Lerp(c, d, fx), fy);
         }
 
+        /// <summary>Value noise on a lattice that wraps every <paramref name="period"/> cells (tileable).</summary>
+        static float TileNoise(float x, float y, int period, int seed)
+        {
+            int xi = Mathf.FloorToInt(x), yi = Mathf.FloorToInt(y);
+            float fx = x - xi, fy = y - yi;
+            fx = fx * fx * (3f - 2f * fx); fy = fy * fy * (3f - 2f * fy);
+            int x0 = ((xi % period) + period) % period, y0 = ((yi % period) + period) % period;
+            int x1 = (x0 + 1) % period, y1 = (y0 + 1) % period;
+            float a = Hash(x0, y0, seed), b = Hash(x1, y0, seed), c = Hash(x0, y1, seed), d = Hash(x1, y1, seed);
+            return Mathf.Lerp(Mathf.Lerp(a, b, fx), Mathf.Lerp(c, d, fx), fy);
+        }
+
+        /// <summary>
+        /// Tileable wavy normal map for glass refraction (SR1 RadAura heat haze): fBm value-noise heights turned into
+        /// tangent-space normals (rgb = n * 0.5 + 0.5, alpha 1, linear).
+        /// </summary>
+        public static Texture2D NoiseNormal(string key, int n, int freq, int octaves, float amp, int seed)
+        {
+            if (_gen.TryGetValue(key, out var have) && have != null) return have;
+            var h = new float[n * n];
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float v = 0f, a = 1f, norm = 0f; int f = freq;
+                    for (int o = 0; o < octaves; o++)
+                    {
+                        v += a * TileNoise(x * f / (float)n, y * f / (float)n, f, seed + o * 31);
+                        norm += a; a *= 0.5f; f *= 2;
+                    }
+                    h[y * n + x] = v / norm;
+                }
+            return Generated(key, n, n, (x, y) =>
+            {
+                float dx = h[y * n + (x + 1) % n] - h[y * n + (x + n - 1) % n];
+                float dy = h[((y + 1) % n) * n + x] - h[((y + n - 1) % n) * n + x];
+                var nv = new Vector3(-dx * amp, -dy * amp, 1f).normalized;
+                return new Color(nv.x * 0.5f + 0.5f, nv.y * 0.5f + 0.5f, nv.z * 0.5f + 0.5f, 1f);
+            }, true);
+        }
+
         /// <summary>
         /// Radial "bubble" (a sphere seen from outside): faint mottled interior, fresnel-bright rim, a few light
         /// bubbles like SR2's slime icons. Colour is sRGB, alpha straight.
@@ -350,6 +390,40 @@ namespace ClassicSlimes
             const int size = 256;
             int cell = size / cells;
             return Generated($"pixmask{seed}_{cells}", size, size, (x, y) => grid[(y / cell) * cells + (x / cell)], true, FilterMode.Point);
+        }
+
+        /// <summary>
+        /// A torn pixel mask for glitch bursts: a PixelMask-style grid with a few horizontal bands slid sideways, blanked
+        /// to one cell colour, or broken into thin scan lines (SR1's glitch shader tore the body into shifted rows).
+        /// </summary>
+        public static Texture2D TearMask(int seed, int cells, float pr, float pg, float pb)
+        {
+            var rng = new System.Random(seed * 7919 + 13);
+            var grid = new Color[cells * cells];
+            for (int i = 0; i < grid.Length; i++)
+            {
+                double v = rng.NextDouble();
+                grid[i] = v < pr ? new Color(1f, 0f, 0f, 1f) : v < pr + pg ? new Color(0f, 1f, 0f, 1f) : v < pr + pg + pb ? new Color(0f, 0f, 1f, 1f) : new Color(0f, 0f, 0f, 1f);
+            }
+            const int size = 256;
+            int cell = size / cells;
+            var kind = new int[size]; var shift = new int[size]; var fill = new Color[size];
+            int bands = 3 + rng.Next(3);
+            for (int b = 0; b < bands; b++)
+            {
+                int y0 = rng.Next(size), h = cell / 2 + rng.Next(cell * 2);
+                int k = rng.Next(5);   // 0-2 slide sideways, 3 solid stripe, 4 scan lines
+                int sh = (rng.Next(2) == 0 ? -1 : 1) * (cell / 2 + rng.Next(cell * 4));
+                var col = rng.Next(3) == 0 ? new Color(0f, 1f, 0f, 1f) : new Color(0f, 0f, 1f, 1f);
+                for (int y = y0; y < y0 + h && y < size; y++) { kind[y] = k < 3 ? 1 : k - 1; shift[y] = sh; fill[y] = col; }
+            }
+            return Generated($"tearmask{seed}_{cells}", size, size, (x, y) =>
+            {
+                int k = kind[y];
+                if (k == 2 || (k == 3 && (y & 3) < 2)) return fill[y];
+                int xx = k == 1 ? ((x + shift[y]) % size + size) % size : x;
+                return grid[(y / cell) * cells + (xx / cell)];
+            }, true, FilterMode.Point);
         }
     }
 
