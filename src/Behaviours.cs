@@ -220,9 +220,12 @@ namespace ClassicSlimes
         Material _holoMat;
         readonly List<Swap> _swapped = new();
         readonly List<Renderer> _hidden = new();
+        readonly List<Renderer> _faces = new();   // eyes / mouth renderers: drop out now and then while see-through
         float _nextPhase, _phaseEnd, _nextFlick, _nextGlitch, _nextJump;
         bool _bodyOff, _fullPhase, _phaseErr, _wallErr;
         Vector2 _holoOfs;
+        /// <summary>Dev (phase .. hold): no solid flicker-ins during a phase, so screenshots always catch the hologram.</summary>
+        public static bool DevHold;
 
         float PhaseDelay() => Mathf.Lerp(14f, 4f, U.Agitation(_emo)) * U.Rand(0.7f, 1.3f);
 
@@ -243,17 +246,19 @@ namespace ClassicSlimes
             if (_phaseEnd > 0f)
             {
                 if (now >= _phaseEnd || held || !Cfg.QuantumHologram.Value) { EndPhase(); return; }
-                if (_fullPhase && now >= _nextFlick)
+                if (_fullPhase && !DevHold && now >= _nextFlick)
                 {
-                    // mostly hologram, short flicker-ins of the solid body
-                    _nextFlick = now + (_bodyOff ? U.Rand(0.15f, 0.45f) : U.Rand(0.03f, 0.07f));
-                    SetBodyOff(!_bodyOff);
+                    // mostly hologram, short flicker-ins of the solid body (the delay belongs to the state being entered)
+                    bool off = !_bodyOff;
+                    _nextFlick = now + (off ? U.Rand(0.15f, 0.45f) : U.Rand(0.03f, 0.07f));
+                    SetBodyOff(off);
                 }
                 if (now >= _nextJump)
                 {
-                    // glitch: the static / band jumps to a random spot
-                    _nextJump = now + U.Rand(0.05f, 0.18f);
-                    _holoOfs = new Vector2(U.Rand(0f, 1f), U.Rand(0f, 1f));
+                    // glitch: the torn band skips up / down (it scrolls in between), the face drops out now and then
+                    _nextJump = now + U.Rand(0.08f, 0.3f);
+                    _holoOfs = new Vector2(U.Rand(0f, 1f), _holoOfs.y + U.Rand(-0.3f, 0.3f));
+                    if (_bodyOff) SetFace(U.Rand(0f, 1f) < 0.55f);
                 }
                 var ofs = new Vector2(_holoOfs.x, _holoOfs.y - now * 0.6f);
                 if (_holoMat != null) _holoMat.SetTextureOffset("_UnlitColorMap", ofs);
@@ -282,7 +287,7 @@ namespace ClassicSlimes
             _nextJump = 0f;
             if (full) _nextPhase = _phaseEnd + PhaseDelay();
             _nextGlitch = Mathf.Max(_nextGlitch, _phaseEnd + U.Rand(1.5f, 4f));
-            _swapped.Clear(); _hidden.Clear();
+            _swapped.Clear(); _hidden.Clear(); _faces.Clear();
             var holo = HoloInstance();
             var all = GetComponentsInChildren<Renderer>();
             foreach (var r in all)
@@ -292,17 +297,22 @@ namespace ClassicSlimes
                 if (mats == null || mats.Length == 0) continue;
                 var idx = new List<int>();
                 var orig = new Material[mats.Length];
+                bool face = false;
                 for (int i = 0; i < mats.Length; i++)
                 {
                     var m = mats[i];
                     orig[i] = m;
                     var sh = m != null ? m.shader : null;
-                    if (sh != null && sh.name.Contains("Slime/Body")) idx.Add(i);
+                    if (sh == null) continue;
+                    if (sh.name.Contains("Slime/Body")) idx.Add(i);
+                    else if (sh.name.Contains("Slime/Face")) face = true;
                 }
                 if (idx.Count > 0) _swapped.Add(new Swap { R = r, Idx = idx.ToArray(), Orig = orig });
+                else if (face) _faces.Add(r);
             }
             if (_swapped.Count == 0)
             {
+                _faces.Clear();
                 if (_holo == null) _holo = Visuals.MakeHolo(transform);
                 if (_holo != null) _holo.SetActive(true);
                 foreach (var r in all) if (Phaseable(r)) _hidden.Add(r);
@@ -329,14 +339,26 @@ namespace ClassicSlimes
                 s.R.sharedMaterials = mats;
             }
             foreach (var r in _hidden) if (r != null) r.enabled = !off;
+            if (!off) SetFace(true);
+        }
+
+        void SetFace(bool on)
+        {
+            foreach (var r in _faces) if (r != null) r.enabled = on;
         }
 
         void EndPhase()
         {
             _phaseEnd = 0f;
             SetBodyOff(false);
-            _swapped.Clear(); _hidden.Clear();
+            _swapped.Clear(); _hidden.Clear(); _faces.Clear();
             if (_holo != null) _holo.SetActive(false);
+        }
+
+        // vacuumed / unloaded mid-phase: never leave the hologram material or a hidden face behind
+        void OnDisable()
+        {
+            if (_phaseEnd > 0f) EndPhase();
         }
 
         // ------------------------------------------------------------- phasing through corral walls
@@ -437,6 +459,20 @@ namespace ClassicSlimes
             Snd.Play(Snd.QuantumWarp, to);
             _ghosts.Remove(g);
             g.Pop(false);
+            // arrives out of phase: a short see-through hologram flicker before it is solid again
+            if (Cfg.QuantumHologram.Value) StartPhase(U.Rand(0.6f, 0.9f));
+        }
+
+        /// <summary>Dev: swap reality with a ghost right now (spawns one beside the slime if it has none).</summary>
+        public void DevTeleport()
+        {
+            _ghosts.RemoveAll(g => g == null);
+            if (_ghosts.Count == 0)
+            {
+                var cam = Camera.main;
+                SpawnGhost(transform.position + (cam != null ? cam.transform.right : Vector3.right) * 1.6f);
+            }
+            if (_ghosts.Count > 0) TeleportTo(_ghosts[U.Rng.Next(_ghosts.Count)]);
         }
 
         public void OnWater() => ClearGhosts(true);
@@ -789,6 +825,7 @@ namespace ClassicSlimes
         public GlitchSlime(IntPtr ptr) : base(ptr) { }
 
         static readonly List<GlitchSlime> All = new();
+        public static bool DevNoDisguise;
         static readonly Dictionary<IntPtr, SlimeAppearance> Disguises = new();
         static List<SlimeFace> _faces;
 
@@ -800,8 +837,9 @@ namespace ClassicSlimes
         float _nextDisguise, _disguiseUntil, _nextFlicker, _flickerEnd, _heldTime;
 
         ParticleSystem _pixels, _trail;
+        TrailRenderer _ribbon, _ribbon2;
         static int _maskFrame = -1;
-        static float _nextMask;
+        static float _nextMask, _nextStrip;
 
         /// <summary>SR1's glitch shader made the pixel cells jump around; swap between a few generated cell masks.</summary>
         static void AnimateMask()
@@ -816,13 +854,37 @@ namespace ClassicSlimes
             m.SetTexture("_ColorMask", masks[U.Rng.Next(masks.Length)]);
         }
 
+        /// <summary>SR1's trail shader re-randomised its pixel cells constantly: cycle the generated strips.</summary>
+        static void AnimateStrip()
+        {
+            if (Time.time < _nextStrip) return;
+            _nextStrip = Time.time + U.Rand(0.06f, 0.14f);
+            var strips = Visuals.GlitchStrips;
+            if (strips == null || strips.Length == 0) return;
+            for (int i = 0; i < 2; i++)
+            {
+                if (!Visuals.Mats.TryGetValue("GlitchRibbon" + i, out var m) || m == null) continue;
+                m.SetTexture("_MainTex", strips[U.Rng.Next(strips.Length)]);
+                m.SetTextureOffset("_MainTex", new Vector2((float)U.Rng.NextDouble(), 0f));
+            }
+        }
+
         void Start()
         {
             All.Add(this);
             _pixels = Gfx.Sparkles("GlitchPixels", transform, new Vector3(0f, 0.7f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.45f, 0.8f, 1f), 3.5f, 1.1f, 0.06f, 0.13f, 0.75f, 12, 0.15f);
             // SR1 glitch: a trail of pixel squares left behind while it moves (world space, emitted per metre)
             if (Cfg.GlitchTrail.Value)
-                _trail = Gfx.Trail("GlitchTrail", transform, new Vector3(0f, 0.3f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.42f, 0.78f, 1f), 7f, 1.2f, 0.07f, 0.16f, 0.4f, 60);
+            {
+                float sc = Mathf.Max(0.3f, transform.lossyScale.x);
+                // SR1 slimeGlitch_trail (glitch shader: magenta bottom, green top): a wide magenta ribbon of flickering
+                // pixel cells behind the body with a narrower green one above it, plus loose pixels
+                _ribbon = Gfx.Ribbon("GlitchRibbon", transform, new Vector3(0f, 0.38f, 0f), Visuals.RibbonMat(0), 0.65f, 0.85f * sc, 0.25f * sc,
+                    new Color(1f, 0.22f, 0.72f, 0.95f), new Color(0.85f, 0.25f, 1f, 0f));
+                _ribbon2 = Gfx.Ribbon("GlitchRibbonTop", transform, new Vector3(0f, 0.62f, 0f), Visuals.RibbonMat(1), 0.5f, 0.55f * sc, 0.12f * sc,
+                    new Color(0.25f, 1f, 0.35f, 0.95f), new Color(0.3f, 1f, 0.9f, 0f));
+                _trail = Gfx.Trail("GlitchTrail", transform, new Vector3(0f, 0.3f, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.42f, 0.78f, 1f), 10f, 1.4f, 0.08f, 0.18f, 0.45f, 80);
+            }
             _app = GetComponent<SlimeAppearanceApplicator>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
@@ -855,6 +917,9 @@ namespace ClassicSlimes
             bool held = _vac != null && _vac.IsHeld();
             Gfx.SetEmitting(_pixels, !held && !_disguised);
             Gfx.SetEmitting(_trail, !held && !_disguised);
+            Gfx.SetEmitting(_ribbon, !held && !_disguised);
+            Gfx.SetEmitting(_ribbon2, !held && !_disguised);
+            if (_ribbon != null) AnimateStrip();
             if (held)
             {
                 if (_disguised) Reveal(true);
@@ -863,7 +928,7 @@ namespace ClassicSlimes
                 return;
             }
             _heldTime = 0f;
-            if (!Cfg.GlitchDisguise.Value) { if (_disguised) Reveal(false); return; }
+            if (!Cfg.GlitchDisguise.Value || DevNoDisguise) { if (_disguised) Reveal(false); return; }
             if (_calm != null && _calm.IsCalmed()) { if (_disguised) Reveal(true); return; }
 
             if (!_disguised)

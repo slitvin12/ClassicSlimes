@@ -164,6 +164,42 @@ namespace ClassicSlimes
             else if (!on && ps.isEmitting) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
         }
 
+        /// <summary>SR1 glitch trail: a camera-facing world-space ribbon (TrailRenderer) behind the slime.</summary>
+        public static TrailRenderer Ribbon(string name, Transform parent, Vector3 localPos, Material mat, float time, float w0, float w1, Color c0, Color c1)
+        {
+            if (parent == null || mat == null) return null;
+            try
+            {
+                var go = new GameObject(name);
+                go.transform.SetParent(parent, false);
+                go.transform.localPosition = localPos;
+                var tr = go.AddComponent<TrailRenderer>();
+                tr.sharedMaterial = mat;
+                tr.time = time;
+                tr.startWidth = w0; tr.endWidth = w1;
+                tr.startColor = c0; tr.endColor = c1;
+                tr.minVertexDistance = 0.06f;
+                tr.numCapVertices = 3;
+                tr.alignment = LineAlignment.View;
+                tr.textureMode = LineTextureMode.Tile;
+                tr.textureScale = new Vector2(1.4f, 1f);
+                tr.shadowCastingMode = ShadowCastingMode.Off;
+                tr.receiveShadows = false;
+                tr.autodestruct = false;
+                tr.Clear();
+                tr.emitting = true;
+                return tr;
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning($"Ribbon {name}: {e.Message}"); return null; }
+        }
+
+        public static void SetEmitting(TrailRenderer tr, bool on)
+        {
+            if (tr == null || tr.emitting == on) return;
+            if (on) tr.Clear();   // no streak from where it stopped (vacpack, teleport)
+            tr.emitting = on;
+        }
+
         // ------------------------------------------------------------------ textures
         static readonly Dictionary<string, Texture2D> _gen = new();
 
@@ -289,6 +325,19 @@ namespace ClassicSlimes
         }, false);
 
         /// <summary>Random pixel-cell colour mask for the multi-colour body shader (R/G/B cells, black = base colour).</summary>
+        /// <summary>
+        /// Glitch trail strip (u = along the ribbon, v = across it): 8x8 pixel cells per tile with random strength and
+        /// gaps that grow towards the ribbon edges -> ragged pixel ray. SR2's particle shader uses only the alpha
+        /// (the colour comes from the trail's vertex colours).
+        /// </summary>
+        public static Texture2D GlitchStrip(int seed) => Generated("glitchstrip" + seed, 32, 32, (x, y) =>
+        {
+            int cx = x / 4, cy = y / 4;
+            float edge = Mathf.Abs((cy + 0.5f) / 8f - 0.5f) * 2f;
+            if (Hash(cx, cy, seed + 101) > 0.92f - edge * 0.65f) return new Color(1f, 1f, 1f, 0f);
+            return new Color(1f, 1f, 1f, 0.45f + 0.55f * Hash(cx, cy, seed + 7));
+        }, false, FilterMode.Point);
+
         public static Texture2D PixelMask(int seed, int cells, float pr, float pg, float pb)
         {
             var rng = new System.Random(seed);

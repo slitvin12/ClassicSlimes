@@ -248,9 +248,10 @@ namespace ClassicSlimes
                 if (_holo != null) return _holo;
                 var m = Mat.Clone("QuantumHolo", "DefaultHDParticleMaterial") ?? Mat.CloneByShader("QuantumHolo", "HDRP/Unlit");
                 if (m == null) return null;
-                // scanlines + SR1 quantum static + a bright glitch band (white, the alpha carries the look)
-                m.Tx("_UnlitColorMap", Res.Tex("fx_quantumHolo") ?? Gfx.ScanlineTex);
-                m.Col("_UnlitColor", new Color(1f, 0.85f, 0.35f, 0.75f));
+                // tools/mkquantum.py: orange scanlines over SR1 quantum static, a torn bright band, a thin band and a
+                // drop-out stripe (linear texture). The HDR golden tint makes the band glow pale yellow over orange lines.
+                m.Tx("_UnlitColorMap", Res.Tex("fx_quantumHolo", true) ?? Gfx.ScanlineTex);
+                m.Col("_UnlitColor", new Color(1.45f, 1.05f, 0.45f, 1f));
                 _holo = Keep(m, "QuantumHolo");
                 return _holo;
             }

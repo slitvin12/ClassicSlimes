@@ -340,27 +340,35 @@ namespace ClassicSlimes
             if (_shell != null) return _shell;
             var m = Mat.Clone("MosaicGlass", "envLabGlass", "SimpleGlass");
             if (m == null) return null;
-            // clear glossy coat over the coloured tiles (reflections + faceted highlights only)
-            m.Col("_Color", new Color(0.70f, 0.90f, 1f, 0f));
-            m.Flt("_Opacity", 0.10f);
-            m.Flt("_Smoothness", 0.97f);
-            m.Flt("_Metallic", 0.2f);
+            // clear glossy coat over the coloured tiles: a thin glass rim + faceted highlights, no milky haze.
+            // Daylight-tuned: opacity / metallic / a wide fresnel (power 2.2) washed the tiles out to pastel, and the
+            // stock fresnel blur (0.39) smeared the refracted background into a broad white halo around the slime.
+            m.Col("_Color", new Color(0.65f, 0.88f, 1f, 0f));
+            m.Flt("_Opacity", 0.04f);
+            m.Flt("_Smoothness", 1f);
+            m.Flt("_Metallic", 0f);
             m.Tx("_NormalMap", Res.Tex("nrm_mosaic", true));
-            m.Flt("_NormalStrength", 0.8f);
+            m.Flt("_NormalStrength", 2f);
             m.Flt("_BaseMapAlpha", 0f);
             m.Flt("_BaseMapColor", 0f);
-            m.Flt("_DistortionStrength", 2f);
-            m.Flt("_ReflectionIntensity", 60f);
-            m.Col("_ReflectionTint", new Color(0.8f, 0.92f, 1f, 0f));
+            m.Flt("_DistortionStrength", 1.5f);
+            m.Flt("_DistortionBlur", 0.01f);
+            m.Flt("_FresnelDistortionBlur", 0.05f);
+            m.Flt("_ReflectionIntensity", 220f);
+            m.Flt("_ReflectionFresnelScale", 1.8f);
+            m.Flt("_ReflectionFresnelPower", 6f);
+            m.Flt("_ReflectionNormalStrength", 0.5f);   // the tile bevels break the reflection into facet glints
+            m.Col("_ReflectionTint", new Color(0.85f, 0.95f, 1f, 0f));
             _shell = Keep(m, "MosaicShell");
             return _shell;
         }
 
         /// <summary>
         /// SR1 slimeMosaic_base: msk_mosaic (R/G/B tiles) indexes a rainbow ramp, nrm_mosaic bevels each tile.
-        /// SR2 equivalent: the multi-colour body shader (colour mask + normals) with a vertical rainbow per channel,
-        /// blue/teal at the top, green/yellow in the middle, orange at the bottom; black mask = bright grout.
-        /// The template already uses exactly the keyword set we need (alpha test + multi colour + normals).
+        /// SR2's per-channel Top/Middle/Bottom ramp does not follow the body height, so the gradient is baked into the
+        /// mask instead: msk_mosaicGrad re-assigns every SR1 tile to R (upper third), G (middle) or B (lower part)
+        /// by its height in the UV layout (tools/mkmosaic.py), and each channel gets one colour family:
+        /// blue top, green middle, orange bottom. Black mask = blue glass grout; nrm_mosaic bevels each tile.
         /// </summary>
         static Material MosaicBodyMat(SlimeSpec s)
         {
@@ -369,11 +377,13 @@ namespace ClassicSlimes
             // SR1 mosaic: deep blue glass with green / orange / yellow / sky-blue tiles. SR2's body gradient mostly blends
             // middle and bottom, so the blue base is kept on all three stops and the tile groups shift colour downwards.
             m.Palette(new Color(0.15f, 0.40f, 1f), new Color(0.12f, 0.32f, 0.95f), new Color(0.10f, 0.28f, 0.85f));
-            m.Tx("_ColorMask", Res.Tex("msk_mosaic", true));
+            m.Tx("_ColorMask", Res.Tex(MosaicMask, true) ?? Res.Tex("msk_mosaic", true));
             m.Flt("_ColorMaskUV1", 0f);
-            m.Col("_RedTopColor", new Color(0.45f, 0.80f, 1f)); m.Col("_RedMiddleColor", new Color(0.35f, 0.90f, 0.30f)); m.Col("_RedBottomColor", new Color(1f, 0.50f, 0.10f));
-            m.Col("_GreenTopColor", new Color(0.20f, 0.50f, 1f)); m.Col("_GreenMiddleColor", new Color(0.30f, 0.75f, 1f)); m.Col("_GreenBottomColor", new Color(0.40f, 0.90f, 0.30f));
-            m.Col("_BlueTopColor", new Color(1f, 0.85f, 0.20f)); m.Col("_BlueMiddleColor", new Color(1f, 0.65f, 0.15f)); m.Col("_BlueBottomColor", new Color(1f, 0.40f, 0.10f));
+            // strongly saturated inputs: SR2's body lighting (subsurface + sky) adds a lot of blue/white, so a plain
+            // orange would end up salmon pink in daylight
+            m.Col("_RedTopColor", new Color(0.10f, 0.45f, 1f)); m.Col("_RedMiddleColor", new Color(0.08f, 0.38f, 1f)); m.Col("_RedBottomColor", new Color(0.06f, 0.32f, 0.95f));
+            m.Col("_GreenTopColor", new Color(0.25f, 0.90f, 0.10f)); m.Col("_GreenMiddleColor", new Color(0.18f, 0.80f, 0.08f)); m.Col("_GreenBottomColor", new Color(0.12f, 0.70f, 0.06f));
+            m.Col("_BlueTopColor", new Color(1f, 0.38f, 0f)); m.Col("_BlueMiddleColor", new Color(1f, 0.30f, 0f)); m.Col("_BlueBottomColor", new Color(0.92f, 0.22f, 0f));
             m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
             m.Tx("_Normal", Res.Tex("nrm_mosaic", true));
             m.Flt("_NormalUV1", 0f);
@@ -385,10 +395,35 @@ namespace ClassicSlimes
             return m;
         }
 
+        /// <summary>Baked gradient mask (tools/mkmosaic.py); SR2 body UVs: image top = top of the slime.</summary>
+        public static string MosaicMask = "msk_mosaicGrad";
+
+        static Mesh _shellMesh;
+        /// <summary>The SR1 mosaic body pushed out a little along its normals, so the glass reads as a coat over the tiles.</summary>
+        static Mesh ShellMesh()
+        {
+            if (_shellMesh != null) return _shellMesh;
+            var m = Res.MeshCopy("mosaic_LOD0");
+            if (m == null) return null;
+            try
+            {
+                var v = m.vertices; var n = m.normals;
+                if (n != null && n.Length == v.Length)
+                {
+                    for (int i = 0; i < v.Length; i++) v[i] = v[i] + n[i] * 0.018f;
+                    m.vertices = v;
+                    m.RecalculateBounds();
+                }
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("Mosaic shell inflate: " + e.Message); }
+            _shellMesh = m;
+            return m;
+        }
+
         static SlimeAppearanceStructure _shellStruct;
         static SlimeAppearanceStructure ShellStructure(SlimeSpec s, SlimeAppearance app)
         {
-            var mesh = Res.Mesh("mosaic_LOD0");
+            var mesh = ShellMesh();
             var mat = ShellMat();
             if (mesh == null || mat == null) return null;
             if (_shellStruct == null)
@@ -470,6 +505,28 @@ namespace ClassicSlimes
                 _pixel = Keep(m, "GlitchPixel");
                 return _pixel;
             }
+        }
+
+        static readonly Material[] _ribbons = new Material[2];
+        public static Texture2D[] GlitchStrips;
+        /// <summary>
+        /// SR1 slimeGlitch_trail: alpha-blended particle material with a pixel-cell strip (swapped by GlitchSlime).
+        /// SR2's particle shader only takes the strip's alpha (cells); the colour comes from the trail's vertex colours,
+        /// so the pink and the green ribbon each get their own material (GlitchRibbon0/1) to flicker independently.
+        /// </summary>
+        public static Material RibbonMat(int i)
+        {
+            i = Mathf.Clamp(i, 0, _ribbons.Length - 1);
+            if (_ribbons[i] != null) return _ribbons[i];
+            GlitchStrips ??= new[] { Gfx.GlitchStrip(3), Gfx.GlitchStrip(17), Gfx.GlitchStrip(29), Gfx.GlitchStrip(41), Gfx.GlitchStrip(53), Gfx.GlitchStrip(67) };
+            var m = Mat.Clone("GlitchRibbon" + i, "DazedStars", "CFX_Particles", "Gold Slime Sparkle");
+            if (m == null) return null;
+            m.Tx("_MainTex", GlitchStrips[i]);
+            m.Col("_Tint", new Color(1.15f, 1.15f, 1.15f, 1f));
+            m.Col("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.8f));
+            m.Flt("_DepthFadeDistance", 0.1f);
+            _ribbons[i] = Keep(m, "GlitchRibbon" + i);
+            return _ribbons[i];
         }
 
         public static Material GlintMat => FlareMat;

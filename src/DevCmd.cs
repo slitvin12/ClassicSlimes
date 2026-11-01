@@ -21,9 +21,17 @@ namespace ClassicSlimes
     {
         static float _next;
         static readonly List<(Rigidbody rb, float until)> _frozen = new();
+        static readonly List<(Transform t, Vector3 a, Vector3 b, float t0, float dur)> _sweeps = new();
 
         public static void Tick()
         {
+            for (int i = _sweeps.Count - 1; i >= 0; i--)
+            {
+                var s = _sweeps[i];
+                float k = (Time.time - s.t0) / s.dur;
+                if (s.t == null || k > 1f) { _sweeps.RemoveAt(i); continue; }
+                s.t.position = Vector3.Lerp(s.a, s.b, k) + Vector3.up * (Mathf.Abs(Mathf.Sin(k * Mathf.PI * 3f)) * 0.35f);
+            }
             for (int i = _frozen.Count - 1; i >= 0; i--)
             {
                 if (Time.time < _frozen[i].until) continue;
@@ -143,12 +151,46 @@ namespace ClassicSlimes
                     }
                     if (a[1] == "Quantum" && a[2] == "_ColorMask") { Gfx.SwirlScale = new Vector2(F(a, 3, 1f), F(a, 4, 1f)); Gfx.SwirlOffset = new Vector2(F(a, 5, 0f), F(a, 6, 0f)); }
                     break;
+                case "filetex":   // filetex <matKey> <prop> <file in UserData/ClassicSlimes without .png>
+                    {
+                        var t = new Texture2D(2, 2, TextureFormat.RGBA32, true, true) { name = "ClassicSlimes_file_" + a[3] };
+                        Il2CppImageConversionManager.LoadImage(t, File.ReadAllBytes(Path.Combine(Diag.Dir, a[3] + ".png")));
+                        t.wrapMode = TextureWrapMode.Repeat; t.filterMode = FilterMode.Trilinear; t.anisoLevel = 4;
+                        t.hideFlags = HideFlags.HideAndDontSave;
+                        foreach (var m in Tune(a[1])) m.SetTexture(a[2], t);
+                        break;
+                    }
+                case "sweep":   // sweep <def> <span m> <seconds>: slide the nearest (posed, frozen) slime sideways across the view
+                    {
+                        var cam = Camera.main; if (cam == null) break;
+                        GameObject best = null; float bd = float.MaxValue;
+                        foreach (var id in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+                        {
+                            var t = id != null ? id.identType : null;
+                            if (t == null || !string.Equals(t.name, a[1], StringComparison.OrdinalIgnoreCase)) continue;
+                            float d = (id.transform.position - cam.transform.position).sqrMagnitude;
+                            if (d < bd) { bd = d; best = id.gameObject; }
+                        }
+                        if (best == null) { L("sweep: no " + a[1]); break; }
+                        var r = cam.transform.right * (F(a, 2, 3f) * 0.5f); var p0 = best.transform.position;
+                        _sweeps.Add((best.transform, p0 - r, p0 + r, Time.time, F(a, 3, 3f)));
+                        break;
+                    }
+                case "nodisguise": GlitchSlime.DevNoDisguise = a.Length < 2 || a[1] != "off"; break;
+                case "restex": foreach (var m in Tune(a[1])) m.SetTexture(a[2], Res.Tex(a[3], true, !(a.Length > 4 && a[4] == "clamp"))); break;
                 case "vec": foreach (var m in Tune(a[1])) m.SetVector(a[2], new Vector4(F(a, 3, 0f), F(a, 4, 0f), F(a, 5, 0f), F(a, 6, 0f))); break;
                 case "palette": Palettes(); break;
-                case "phase":
+                case "phase":   // phase [sec] [hold]: hologram phase of the nearest quantum (hold = no solid flicker-ins)
                     {
                         var cam = Camera.main; var q = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
+                        QuantumSlime.DevHold = a.Length > 2 && a[2] == "hold";
                         if (q != null) q.GetComponent<QuantumSlime>().StartPhase(F(a, 1, 1f)); else L("no quantum slime");
+                        break;
+                    }
+                case "qtp":   // nearest quantum swaps reality with one of its ghosts right now
+                    {
+                        var cam = Camera.main; var q = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
+                        if (q != null) q.GetComponent<QuantumSlime>().DevTeleport(); else L("no quantum slime");
                         break;
                     }
                 case "walls":
@@ -163,12 +205,23 @@ namespace ClassicSlimes
             }
         }
 
-        /// <summary>Materials for live tuning: a Visuals.Mats key, or every loaded material with that exact name.</summary>
+        /// <summary>
+        /// Materials to tune: the registered one, every material with exactly that name (name prefix with a trailing '*'),
+        /// and the live copies SR2's appearance code makes of a registered material ("X(Clone)(Clone)..").
+        /// </summary>
         static List<Material> Tune(string key)
         {
             var r = new List<Material>();
+            bool prefix = key.Length > 1 && key.EndsWith("*");
+            if (prefix) key = key.Substring(0, key.Length - 1);
             if (Visuals.Mats.TryGetValue(key, out var m) && m != null) r.Add(m);
-            foreach (var x in Resources.FindObjectsOfTypeAll<Material>()) if (x != null && x.name == key && !r.Contains(x)) r.Add(x);
+            var clone = m != null ? m.name + "(Clone)" : null;
+            foreach (var x in Resources.FindObjectsOfTypeAll<Material>())
+            {
+                if (x == null || r.Contains(x)) continue;
+                var n = x.name;
+                if (n == key || (prefix && n.StartsWith(key, StringComparison.Ordinal)) || (clone != null && n.StartsWith(clone, StringComparison.Ordinal))) r.Add(x);
+            }
             if (r.Count == 0) ClassicSlimesMod.Log.Warning("[cmd] no material " + key);
             return r;
         }
