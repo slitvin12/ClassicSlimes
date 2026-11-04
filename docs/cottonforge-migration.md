@@ -1,7 +1,7 @@
 # Перенос ClassicSlimes на CottonForge
 
-Ветка `cottonforge-migration` (от `v1.1.0`, `dd7c1d3`). Здесь — план; код мода в ветке не менялся, добавлено только
-свойство сборки `CottonDll`.
+Ветка `cottonforge-migration` (от `v1.1.0`, `dd7c1d3`), влита в `main` как v1.2.0. Этап 1 (drop-in) и стили ларго
+через `LargoStyle`/`LargoRecipe` форка сделаны (`src/LargoLook.cs`); остальные этапы ниже — план.
 
 ## Цель
 
@@ -65,6 +65,32 @@ dotnet build -c Release -p:CottonDll="%TEMP%\cf_snapshot\CottonLibrary.dll"
 загружается та `CottonLibrary.dll`, что лежит в `Mods`. Форк заменяет Cotton под тем же именем, поэтому для теста в
 игре его DLL кладут вместо Cotton 0.3.1 — это правка чужого мода: только с согласия пользователя, с `.bak` и
 `nai_savebak.py`.
+
+## Смешивание ларго (`src/LargoLook.cs`)
+
+Мягкая зависимость, собрано, в игре не проверено. На форке ларго собирает движок `LargoBlend`, ClassicSlimes задаёт ему
+стили:
+
+| Слайм | Стиль | Зачем |
+|---|---|---|
+| Rad | `Body(High).Face(Low).Colors(1.4f).KeepOwnColors("*")` | светящееся тело Rad (как в SR1), лицо второго родителя, зелёный весомее в смеси |
+| Quantum, Mosaic | `Body(Low).Face(Low).KeepOwnColors("*")` | как в 1.1.0: тело и лицо второго родителя, свои части без перекраски; эффекты добавляют `QuantumLargo`/`MosaicLargo` |
+
+- `SlimeSpec.LargoSettings` = прежние флаги + `LargoLook.Auto` (0x1C00). Cotton 0.3.1 эти биты не видит (`HasFlag`) и
+  собирает ларго как раньше; форк по ним решает сам по стилям.
+- `LargoLook.Register()` вызывается перед `SlimeFactory.CreateAll()`; на 0.3.1 пишет в лог «original Cotton merge» и выходит.
+- `RadLargo`/`QuantumLargo`/`MosaicLargo` стирают radiant-варианты (`ClearRadiant`), только если ларго собрано не движком
+  форка (`LargoLook.Blended`): на 0.3.1 они розово-каменные, на форке — настоящие. `MosaicLargo` на форке ставит оболочку и
+  на radiant-внешности.
+- Паритет форка (`LargoParity`) копирует ларго компоненты родителей, кроме инъекций модов: `RadLargo`, `QuantumLargo`,
+  `MosaicLargo` по-прежнему ставит ClassicSlimes. Иконки ларго (на 0.3.1 — иконка PinkRock) форк собирает сам
+  (`SlimeIcons`: иконка ванильного ларго или родителя в палитре ларго + значок второго родителя).
+- Цвета: по умолчанию палитра одного родителя — того, чьи цвета чаще побеждают в ванильных ларго. Вес цвета Rad 1,4
+  (`Colors(1.4f)` в `LargoLook`) теперь означает долю 0,70: Rad + Tabby, Rad + Batty — зелёные, Rad + Pink, Rad + Boom,
+  Rad + Sloomber — в палитре второго (Pink побеждает в 14 из 14 ванильных ларго). Нужна смесь — `.Colors(LargoColorMode.Blend)`.
+- Проверено в игре (60 ларго Rad, Quantum, Mosaic): `[largo audit] 60 generated largos, 0 with problems`, у всех своя
+  иконка, radiant-варианты; по аудиту плорты Rad/Quantum/Mosaic в группах ванильных плортов и их едят вторые родители;
+  `largoaudit vanilla` — тело 42/46, лицо 92/104, палитра dE 0,025, части 97 %.
 
 ## Этапы
 
@@ -195,7 +221,9 @@ ClassicSlimes 2.0 с зависимостью от CottonForge: README (уста
 - ID в сейвах. `SlimeBuilder` обязан давать те же ID, что Cotton 0.3.1: `SlimeDefinition.<Name>`,
   `IdentifiableType.<Name>Plort`, `<Name>Default`, префаб `plort<Name>`, — иначе слаймы и плорты пропадут из старых
   сейвов. Сверять на старом сейве до и после.
-- Ларго. Имена и ID ларго генерирует Cotton (`LargoSettings`); `LargoEngine` форка должен давать те же.
+- Ларго. Имена и ID ларго генерирует Cotton (`LargoSettings`); `LargoEngine` форка должен давать те же. `LargoBlend`
+  меняет только внешность (структуры, материалы, radiant-варианты), `LargoParity` — группы, компоненты, зоны, иконку,
+  full art и пустые поля диеты; имена и ID — нет.
 - Настройки. Категория `[ClassicSlimes]` и имена настроек при переходе на `LiveConfig` не меняются.
 - Двойные патчи на этапах 1–2 (список в этапе 1): двойные эффекты — два обработчика воды или еды, двойной спавн.
 - Состояние вне сейва. `ForgeSave` пишет JSON в `UserData\CottonLibrary\saves`; наше состояние туда без нужды не

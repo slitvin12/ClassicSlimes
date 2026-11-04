@@ -832,11 +832,8 @@ namespace ClassicSlimes
             _glints.Clear();
         }
 
-        // ------------------------------------------------------------- jelly: the whole slime squashes and stretches
-        // SR2 squashes / stretches a slime in its body's vertex shader. The SR1 glass shell is a second renderer whose
-        // glass shader can't, so the tiles poked through the rigid glass. With Cfg.MosaicJelly a JellyRig turns the
-        // shader wobble off and squashes / stretches the bone root of the slime instead: body, face and glass shell
-        // wobble together.
+        // Native contact squash stays active. The glass follows its actual warped vertices, not a scaled sphere.
+        ElasticGlassRig _glass;
         readonly JellyRig _jelly = new();
         float _born;
         bool _jellyTried;
@@ -846,9 +843,17 @@ namespace ClassicSlimes
 
         void LateUpdate()
         {
+            if (Visuals.MosaicGlassMode == 3)
+            {
+                if (Time.time - _born < 0.3f) return;
+                try { (_glass ??= new ElasticGlassRig(transform)).Sync(); }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning("Mosaic glass bind: " + e.Message); }
+                return;
+            }
+            if (_glass != null) { _glass.Dispose(); _glass = null; }
             if (!_jellyTried)
             {
-                if (Time.time - _born < 0.3f || !Cfg.MosaicJelly.Value) return;
+                if (Visuals.MosaicGlassMode != 0 || Time.time - _born < 0.3f || !Cfg.MosaicJelly.Value) return;
                 _jellyTried = true;
                 try { _jelly.Init(transform, JellyBody()); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Mosaic jelly: " + e.Message); }
                 return;
@@ -869,16 +874,18 @@ namespace ClassicSlimes
             return null;
         }
 
-        public string JellyInfo() => _jelly.Ok ? _jelly.Info() : $"jelly off (tried {_jellyTried})";
+        public string JellyInfo() => _glass != null ? _glass.Info() : _jelly.Ok ? _jelly.Info() : $"glass pending / jelly off (tried {_jellyTried})";
 
         void OnDisable()
         {
+            if (_glass != null) { _glass.Dispose(); _glass = null; }
             _jelly.Restore();
             _jellyTried = false;
         }
 
         void OnDestroy()
         {
+            if (_glass != null) { _glass.Dispose(); _glass = null; }
             foreach (var g in _glints) if (g != null) Object.Destroy(g.gameObject);
             _glints.Clear();
         }

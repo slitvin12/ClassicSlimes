@@ -5,7 +5,7 @@ using Il2CppInterop.Runtime.Injection;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.1.0", "ClassicSlimes")]
+[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.2.0", "ClassicSlimes")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 [assembly: MelonAdditionalDependencies("CottonLibrary")]
 
@@ -52,6 +52,7 @@ namespace ClassicSlimes
             }
             try { Foods.Setup(); }
             catch (Exception e) { Log.Error("Foods.Setup failed: " + e); }
+            LargoLook.Register();
             try { SlimeFactory.CreateAll(); }
             catch (Exception e) { Log.Error("CreateAll failed: " + e); }
         }

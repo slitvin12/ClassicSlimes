@@ -316,6 +316,23 @@ namespace ClassicSlimes
                         Tree(go.transform, 0, (int)F(a, 2, 3f));
                         break;
                     }
+                case "mglass": // mglass on|off: diagnostics/performance baseline; does not alter the body
+                    ElasticGlassRig.Show = a.Length < 2 || a[1] != "off";
+                    L("elastic glass " + ElasticGlassRig.Show + $"; all rigs {ElasticGlassRig.TotalMs:F2} ms");
+                    break;
+                case "iris":   // iris [speed intensity fresnelPower normalStrength]: rainbow shimmer of the mosaic glass
+                    {
+                        Visuals.MosaicIrisSpeed = F(a, 1, Visuals.MosaicIrisSpeed);
+                        var g = Visuals.MosaicElasticGlassMaterial();
+                        if (g != null)
+                        {
+                            if (a.Length > 2) g.SetFloat("_ReflectionIntensity", F(a, 2, Visuals.MosaicIrisIntensity));
+                            if (a.Length > 3) g.SetFloat("_ReflectionFresnelPower", F(a, 3, Visuals.MosaicIrisFresnel));
+                            if (a.Length > 4) g.SetFloat("_ReflectionNormalStrength", F(a, 4, Visuals.MosaicIrisNormal));
+                            L($"iris speed {Visuals.MosaicIrisSpeed} intensity {g.GetFloat("_ReflectionIntensity")} fresnel {g.GetFloat("_ReflectionFresnelPower")} normal {g.GetFloat("_ReflectionNormalStrength")}");
+                        }
+                    }
+                    break;
                 case "mjelly":   // mjelly [gain lean stretch freq damp inertia]: glass-slime squash & stretch (+ info of the nearest mosaic / quantum)
                     {
                         JellyRig.Gain = F(a, 1, JellyRig.Gain); JellyRig.MaxLean = F(a, 2, JellyRig.MaxLean); JellyRig.MaxStretch = F(a, 3, JellyRig.MaxStretch);

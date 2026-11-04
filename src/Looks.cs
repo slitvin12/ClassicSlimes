@@ -211,12 +211,13 @@ namespace ClassicSlimes
             var m = BodyMat("Rad", s, "slimePhosphorBase", "slimePinkBase");
             if (m != null)
             {
-                m.Palette(new Color(0.42f, 1f, 0.36f), new Color(0.10f, 0.88f, 0.18f), new Color(0.03f, 0.55f, 0.09f));
-                m.Col("_GlowTop", new Color(0.35f, 1.6f, 0.30f, 1f));
-                m.Flt("_GlowStrength", 1f);
+                // Original SR1 body palette; subtle self-light, not a fluorescent phosphor blob.
+                m.Palette(new Color(0.2704f, 0.8971f, 0.4822f), new Color(0f, 0.5f, 0.0655f), new Color(0.1116f, 0.2279f, 0f));
+                m.Col("_GlowTop", new Color(0.27f, 0.90f, 0.48f, 1f));
+                m.Flt("_GlowStrength", 0.16f);
                 m.Flt("_GlowSpeed", 0.7f);
-                m.Flt("_GlowMin", 0.45f);
-                m.Flt("_GlowMax", 1f);
+                m.Flt("_GlowMin", 0.15f);
+                m.Flt("_GlowMax", 0.4f);
                 m.Flt("_GlossPower", 0.6f);
                 m.Kw("_ENABLEHYPEREFFECT_ON", false); m.Flt("_EnableHyperEffect", 0f);
                 m.Kw("_ENABLEVORTEX_ON", false); m.Flt("_EnableVortex", 0f);
@@ -229,7 +230,7 @@ namespace ClassicSlimes
 
         public static void RadLargo(SlimeDefinition d)
         {
-            ClearRadiant(d);
+            if (!LargoLook.Blended(d)) ClearRadiant(d);   // CottonForge builds real radiant variants
             Behaviours.Add<RadSlime>(d);
         }
 
@@ -270,23 +271,23 @@ namespace ClassicSlimes
                     m = Mat.Clone("RadDome0", "envLabGlass", "SimpleGlass");
                     if (m == null) break;
                     m.Col("_Color", new Color(0.10f, 1f, 0.15f, 0f));
-                    m.Flt("_Opacity", 0.24f);           // the 2x bigger aura at 0.42 hid the slime inside (SR1: clear centre, bright edge)
+                    m.Flt("_Opacity", 0.075f);          // several overlapping domes must not paint every slime neon green
                     m.Flt("_Smoothness", 0.62f);        // less mirror-like: the sky made the edge blue
                     m.Flt("_Metallic", 0f);
                     // SR1 RadAura refracted the world behind it into wavy heat-haze ripples: a tileable noise normal map
                     // (dptNoiseClouds is no normal map: it only shifted the picture), animated by the dome's slow spin
                     m.Tx("_NormalMap", RadNrm ?? GameTex("dptNoiseClouds"));
                     m.SetTextureScale("_NormalMap", new Vector2(2f, 2f));
-                    m.Flt("_NormalStrength", 1f);
+                    m.Flt("_NormalStrength", 0.4f);
                     m.Tx("_Reflection", RadRimTex);
-                    m.Flt("_ReflectionIntensity", 60f);
+                    m.Flt("_ReflectionIntensity", 32f);
                     m.Flt("_ReflectionFresnelScale", 1.5f);
-                    m.Flt("_ReflectionFresnelPower", 2.2f);    // a brighter, narrower green edge (SR1)
+                    m.Flt("_ReflectionFresnelPower", 3.6f);    // narrow green rim, clearer centre
                     m.Flt("_ReflectionNormalStrength", 0.1f);
                     m.Col("_ReflectionTint", new Color(0.25f, 1f, 0.22f, 0f));
-                    m.Flt("_DistortionStrength", 14f);   // the heat haze inside does the boiling now
+                    m.Flt("_DistortionStrength", 3f);    // heat haze stays readable when auras overlap
                     m.Flt("_DistortionBlur", 0.015f);
-                    m.Flt("_FresnelDistortionBlur", 0.25f);
+                    m.Flt("_FresnelDistortionBlur", 0.06f);
                     m.Flt("_BaseMapAlpha", 0f);
                     m.Flt("_BaseMapColor", 0f);
                     // one surface only (no inner back side doubling the edge, nothing drawn while standing inside)
@@ -377,7 +378,7 @@ namespace ClassicSlimes
                 return _radHaze;
             }
         }
-        public static float HazeStrength = 40f;
+        public static float HazeStrength = 12f;
 
         static Material _radCore;
         /// <summary>SR1 slimeRadAura_core: SR/AMP/Slime/FX/PhosCore Aura with radial perlin noise (same shader exists in SR2).</summary>
@@ -448,48 +449,51 @@ namespace ClassicSlimes
             m.Flt("_DistortionStrength", 1.5f);
             m.Flt("_DistortionBlur", 0.01f);
             m.Flt("_FresnelDistortionBlur", 0.05f);
-            m.Flt("_ReflectionIntensity", 220f);
+            // SR1 mosaic glass shimmers in rainbow colours (thin-film look): a rainbow reflection map instead of a white
+            // one. The tile bevels (reflection normal strength) give every tile its own hue, the view angle and
+            // MosaicIrisSpeed (ElasticGlassRig) make the colours run over the glass. Tune live: flt/col MosaicShell ...
+            m.Tx("_Reflection", IridescentTex);
+            m.Flt("_ReflectionIntensity", MosaicIrisIntensity);
             m.Flt("_ReflectionFresnelScale", 1.8f);
-            m.Flt("_ReflectionFresnelPower", 6f);
-            m.Flt("_ReflectionNormalStrength", 0.5f);   // the tile bevels break the reflection into facet glints
-            m.Col("_ReflectionTint", new Color(0.85f, 0.95f, 1f, 0f));
+            m.Flt("_ReflectionFresnelPower", MosaicIrisFresnel);
+            m.Flt("_ReflectionNormalStrength", MosaicIrisNormal);   // the tile bevels break the reflection into facet glints
+            m.Col("_ReflectionTint", new Color(1f, 1f, 1f, 0f));
             _shell = Keep(m, "MosaicShell");
             return _shell;
         }
 
+        // tuned in game against SR1 screenshots (iris 0.03 750 2.4 2): rainbow rims and per-tile hues, tiles still readable
+        public static float MosaicIrisIntensity = 750f, MosaicIrisFresnel = 2.4f, MosaicIrisNormal = 2f, MosaicIrisSaturation = 0.85f;
+        /// <summary>UV drift per second of the rainbow reflection (0 = colours only follow the view angle).</summary>
+        public static float MosaicIrisSpeed = 0.03f;
+
         /// <summary>
-        /// SR1 slimeMosaic_base: msk_mosaic (R/G/B tiles) indexes a rainbow ramp, nrm_mosaic bevels each tile.
-        /// SR2's per-channel Top/Middle/Bottom ramp does not follow the body height, so the gradient is baked into the
-        /// mask instead: msk_mosaicGrad re-assigns every SR1 tile to R (upper third), G (middle) or B (lower part)
-        /// by its height in the UV layout (tools/mkmosaic.py), and each channel gets one colour family:
-        /// blue top, green middle, orange bottom. Black mask = blue glass grout; nrm_mosaic bevels each tile.
+        /// Soft rainbow bands (periodic in u and v, so no seam however SimpleGlass maps it), pastel enough to keep the
+        /// rim as bright as the old white map: cyan / violet / pink / gold / green like SR1's mosaic glass.
         /// </summary>
+        static Texture2D IridescentTex => Gfx.Generated("mosaicIris", 256, 256, (x, y) =>
+        {
+            float u = x / 256f, v = y / 256f, tau = Mathf.PI * 2f;
+            float hue = u + v + 0.09f * Mathf.Sin(tau * (2f * u + v)) + 0.05f * Mathf.Sin(tau * (u - 3f * v));
+            hue -= Mathf.Floor(hue);
+            float value = 0.9f + 0.1f * Mathf.Sin(tau * (3f * u + 2f * v));
+            var c = Color.HSVToRGB(hue, MosaicIrisSaturation, value);
+            c.a = 1f;
+            return c;
+        }, false);
+
+        /// <summary>Native SR2 slime surface: a continuous blue / emerald / amber tile gradient and bevel normals.</summary>
         static Material MosaicBodyMat(SlimeSpec s)
         {
-            var m = Mat.Clone("MosaicBody", "FlutterDefaultPinkDefault_Wings", "slimeFlutterWing", "slimeRingtailBase", "slimePinkBase");
+            var m = Mat.Clone("MosaicBody", "slimePinkBase", "slimeRockBase");
             if (m == null) return null;
-            // SR1 mosaic: deep blue glass with green / orange / yellow / sky-blue tiles. SR2's body gradient mostly blends
-            // middle and bottom, so the blue base is kept on all three stops and the tile groups shift colour downwards.
-            m.Palette(new Color(0.15f, 0.40f, 1f), new Color(0.12f, 0.32f, 0.95f), new Color(0.10f, 0.28f, 0.85f));
-            m.Tx("_ColorMask", Res.Tex(MosaicMask, true) ?? Res.Tex("msk_mosaic", true));
-            m.Flt("_ColorMaskUV1", 0f);
-            // strongly saturated inputs: SR2's body lighting (subsurface + sky) adds a lot of blue/white, so a plain
-            // orange would end up salmon pink in daylight
-            m.Col("_RedTopColor", new Color(0.10f, 0.45f, 1f)); m.Col("_RedMiddleColor", new Color(0.08f, 0.38f, 1f)); m.Col("_RedBottomColor", new Color(0.06f, 0.32f, 0.95f));
-            m.Col("_GreenTopColor", new Color(0.25f, 0.90f, 0.10f)); m.Col("_GreenMiddleColor", new Color(0.18f, 0.80f, 0.08f)); m.Col("_GreenBottomColor", new Color(0.12f, 0.70f, 0.06f));
-            m.Col("_BlueTopColor", new Color(1f, 0.38f, 0f)); m.Col("_BlueMiddleColor", new Color(1f, 0.30f, 0f)); m.Col("_BlueBottomColor", new Color(0.92f, 0.22f, 0f));
-            m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
-            m.Tx("_Normal", Res.Tex("nrm_mosaic", true));
-            m.Flt("_NormalUV1", 0f);
-            m.Flt("_NormalSmoothTop", 0f);
-            m.Flt("_NormalPanX", 0f); m.Flt("_NormalPanY", 0f);
-            m.Flt("_GlossPower", 0.9f);
-            m.Flt("_BodyLightingContribution", 0.85f);
+            MosaicSurface(m, Color.white, Color.white, Color.white, 0f);
+            m.Kw("_ENABLEVORTEX_ON", false); m.Flt("_EnableVortex", 0f);
             Keep(m, "Mosaic");
             return m;
         }
 
-        /// <summary>Baked gradient mask (tools/mkmosaic.py); SR2 body UVs: image top = top of the slime.</summary>
+        /// <summary>Smooth height weights, retaining a little per-tile colour variation (tools/mkmosaic.py).</summary>
         public static string MosaicMask = "msk_mosaicGrad";
 
         static Mesh _shellMesh;
@@ -529,12 +533,12 @@ namespace ClassicSlimes
         }
 
         /// <summary>
-        /// How the SR1 glass coat is drawn: 0 = separate SR1 shell mesh (SR2 squashes and stretches the body in its
-        /// vertex shader, the shell's glass shader can't - with Cfg.MosaicJelly the whole slime squashes instead, see
-        /// MosaicSlime), 1 = a second material on the body renderer itself (like SR2's radiant aura: follows the squash,
-        /// but the aura shader can't draw clear glass, the coat was barely visible), 2 = none.
+        /// Surface mode: 3 (default) = SimpleGlass coat on the native body's exact skinned + warped vertices.
+        /// 2 = tile surface only, 0 = legacy SR1 shell / root JellyRig, 1 = experimental aura coat.
+        /// SimpleGlass lacks the native vertex warp; ElasticGlassRig supplies it without changing the body's physics.
         /// </summary>
-        public static int MosaicGlassMode = 0;
+        public static int MosaicGlassMode = 3;
+        internal static Material MosaicElasticGlassMaterial() => ShellMat();
         public static string MosaicCoatTemplate = "RadiantAura_strong";
 
         static Material _coat;
@@ -553,7 +557,7 @@ namespace ClassicSlimes
         {
             ClearRadiant(s.Def);
             var app = App(s);
-            // SR1 slimeMosaicBase: blue top, green middle, orange-red bottom (seen through the glass)
+            // Native coloured tiles plus an elastic clear coat, created per live body/LOD by ElasticGlassRig.
             var body = MosaicBodyMat(s);
             if (body != null) SetBodyMaterial(app, body, MosaicGlassMode == 1 ? MosaicCoatMat() : null);
             if (MosaicGlassMode == 0)
@@ -566,12 +570,20 @@ namespace ClassicSlimes
 
         public static void MosaicLargo(SlimeDefinition d)
         {
-            ClearRadiant(d);
+            bool blended = LargoLook.Blended(d);
+            if (!blended) ClearRadiant(d);   // CottonForge builds real radiant variants: they get the shell too
             var s = SlimeFactory.Spec("Mosaic");
+            var apps = d.AppearancesDefault;
+            for (int ai = 0; ai < (blended ? apps.Length : 1); ai++)
             try
             {
-                var app = d.AppearancesDefault[0];
-                if (MosaicGlassMode == 1)
+                var app = apps[ai];
+                if (app == null) continue;
+                if (MosaicGlassMode == 2 || MosaicGlassMode == 3)
+                {
+                    MosaicNative(app, MosaicLargoTint);
+                }
+                else if (MosaicGlassMode == 1)
                 {
                     // the coat goes on the mosaic-tiled body of the largo (same squash/stretch as the tiles)
                     var coat = MosaicCoatMat();

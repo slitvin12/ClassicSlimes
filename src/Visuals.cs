@@ -304,7 +304,7 @@ namespace ClassicSlimes
 
         public static void QuantumLargo(SlimeDefinition d)
         {
-            ClearRadiant(d);
+            if (!LargoLook.Blended(d)) ClearRadiant(d);   // CottonForge builds real radiant variants
             Behaviours.Add<QuantumSlime>(d);
         }
 

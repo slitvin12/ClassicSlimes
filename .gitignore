@@ -20,6 +20,7 @@ tools/*
 !tools/gen_loc.py
 !tools/prepare_assets.py
 !tools/prep_tex.py
+!tools/mkmosaic.py
 !tools/relaunch.py
 !tools/shots.py
 !tools/crop.py

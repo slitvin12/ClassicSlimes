@@ -110,6 +110,25 @@ namespace ClassicSlimes
             return written == 0 ? 2f : ov / (float)written;
         }
 
+        static readonly System.Collections.Generic.Dictionary<string, (Texture2D tex, int set)> _shared = new();
+        /// <summary>
+        /// Spiral mask for a largo body mesh, baked once per mesh and kept (never destroyed by later bakes,
+        /// unlike <see cref="Bake"/>'s single debug texture). <paramref name="set"/> = uv set for _ColorMaskUV1.
+        /// </summary>
+        public static Texture2D Shared(Mesh mesh, out int set)
+        {
+            set = 0;
+            if (mesh == null) return null;
+            if (_shared.TryGetValue(mesh.name, out var e) && e.tex != null) { set = e.set; return e.tex; }
+            var keep = _last; _last = null;   // this bake must not destroy the base quantum's mask
+            int lastSet = LastSet;
+            var tex = Bake(mesh);
+            _last = keep;
+            if (tex != null) { set = LastSet; _shared[mesh.name] = (tex, set); }
+            LastSet = lastSet;
+            return tex;
+        }
+
         /// <summary>The spiral mask (red channel) for the body mesh, or null when the mesh can't be read.</summary>
         public static Texture2D Bake(Mesh mesh, bool debug = false)
         {

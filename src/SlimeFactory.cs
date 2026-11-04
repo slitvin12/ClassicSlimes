@@ -15,7 +15,8 @@ namespace ClassicSlimes
         public string Key;           // SR1 localisation key part, e.g. "rad"
         public Color32 Top, Mid, Bot, Ammo;
         public bool Largo;
-        public Library.LargoSettings LargoSettings = Library.LargoSettings.KeepSecondBody | Library.LargoSettings.KeepSecondFace | Library.LargoSettings.MergeColors;
+        // + LargoLook.Auto: CottonForge's smart largo engine decides with the LargoLook styles; the original Cotton ignores it
+        public Library.LargoSettings LargoSettings = Library.LargoSettings.KeepSecondBody | Library.LargoSettings.KeepSecondFace | Library.LargoSettings.MergeColors | LargoLook.Auto;
         public IdentifiableTypeGroup[] FoodGroups = new IdentifiableTypeGroup[0];
         public string[] FavoriteHints = new string[0];
         public string[] ToyHints = new string[0];

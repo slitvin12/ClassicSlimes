@@ -66,7 +66,7 @@ namespace ClassicSlimes
             RadHaze = Cat.CreateEntry("RadHaze", true, "The rad aura boils with SR1-style heat haze (refraction volume inside the dome)");
             GlitchFlees = Cat.CreateEntry("GlitchFlees", true, "A glitch slime that was caught (its disguise blown) and thrown away runs off in a panic");
             QuicksilverRuns = Cat.CreateEntry("QuicksilverRuns", true, "Quicksilver slimes never hop: they race along the ground");
-            MosaicJelly = Cat.CreateEntry("MosaicJelly", true, "Mosaic slimes squash and stretch as a whole, so the SR1 glass shell wobbles with the tiles (off: SR2's squash in the body shader, the glass stays rigid)");
+            MosaicJelly = Cat.CreateEntry("MosaicJelly", true, "Whole-root jelly for the legacy separate Mosaic glass shell only; the default native surface keeps SR2 contact squash");
             QuantumJelly = Cat.CreateEntry("QuantumJelly", true, "Quantum slimes are see-through golden jelly with the SR1 spiral inside (off: opaque body with a painted spiral)");
         }
     }
