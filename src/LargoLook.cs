@@ -89,9 +89,28 @@ namespace ClassicSlimes
 
         // ------------------------------------------------------------ SR1 largo palettes (Steam guide 2376297882)
         static readonly Color RadTop = new(0.2704f, 0.8971f, 0.4822f), RadMid = new(0f, 0.5f, 0.0655f), RadBottom = new(0.1116f, 0.2279f, 0f);
-        static readonly Color GoldTop = new(1f, 0.82f, 0.26f), GoldMid = new(0.98f, 0.64f, 0.10f), GoldBottom = new(0.85f, 0.45f, 0.06f), GoldBand = new(1f, 0.94f, 0.58f);
-        static readonly Color PinkTop = new(1f, 0.4039f, 0.651f), PinkMid = new(1f, 0.2118f, 0.2706f), PinkBottom = new(0.4275f, 0f, 0.2706f), PinkBand = new(1f, 0.72f, 0.84f);
-        static readonly Color LimeTop = new(0.78f, 0.98f, 0.25f), LimeMid = new(0.50f, 0.82f, 0.06f), LimeBottom = new(0.22f, 0.45f, 0.02f), LimeBand = new(0.90f, 1f, 0.55f);
+        // SR1 quantum largos are lemon (slimeQuantumBase top 1 / 0.98 / 0.37, middle 1 / 0.68 / 0); SR2's lighting turned
+        // the old 0.64-green middle orange, so the body sits between the SR1 top and middle colours.
+        static readonly Color GoldTop = new(1f, 0.96f, 0.45f), GoldMid = new(1f, 0.82f, 0.16f), GoldBottom = new(0.90f, 0.62f, 0.06f);
+        static readonly Color PinkTop = new(1f, 0.4039f, 0.651f), PinkMid = new(1f, 0.2118f, 0.2706f), PinkBottom = new(0.4275f, 0f, 0.2706f);
+        static readonly Color LimeTop = new(0.78f, 0.98f, 0.25f), LimeMid = new(0.50f, 0.82f, 0.06f), LimeBottom = new(0.22f, 0.45f, 0.02f);
+        static readonly Color BoomTop = new(1f, 0.3882f, 0.3882f), BoomMid = new(0.8078f, 0f, 0f), BoomBottom = new(0.4196f, 0f, 0f);
+
+        /// <summary>
+        /// Effect colours of SR2-only bodies that the palette does not reach: Twin's mirror glow, Sloomber's starry gradient
+        /// and Hyper's fresnel rim stayed cyan / blue / yellow on green Rad and golden Quantum largos.
+        /// </summary>
+        static void EffectColors(Material m, Color top, Color mid, Color bottom)
+        {
+            if (m == null) return;
+            m.Col("_TwinTopColor", Color.Lerp(top, Color.white, 0.25f)); m.Col("_TwinMiddleColor", top); m.Col("_TwinBottomColor", mid);
+            m.Col("_SloomberTopColor", top); m.Col("_SloomberBottomColor", mid);
+            if (m.HasProperty("_HyperFresnelColor"))
+            {
+                var h = Color.Lerp(top, Color.white, 0.3f); h.a = m.GetColor("_HyperFresnelColor").a;
+                m.SetColor("_HyperFresnelColor", h);
+            }
+        }
 
         /// <summary>Parts that keep their own look in Rad / Quantum largos (SR1: crystals, honeycomb, effects).</summary>
         static readonly HashSet<string> OwnParts = new(StringComparer.OrdinalIgnoreCase)
@@ -143,7 +162,7 @@ namespace ClassicSlimes
         static void Paint(CottonLibrary.Forge.LargoBuild c, Color top, Color mid, Color bottom, float identity)
         {
             var body = c.BodyMaterial;
-            if (body != null) body.Palette(top, mid, bottom);
+            if (body != null) { body.Palette(top, mid, bottom); EffectColors(body, top, mid, bottom); }
             if (c.Appearance != null)
             {
                 var p = c.Appearance._colorPalette;
@@ -151,13 +170,15 @@ namespace ClassicSlimes
                 c.Appearance._colorPalette = p; c.Appearance.ColorPaletteNew = p;
                 c.Appearance._splatColor = mid; c.Appearance.SetSplatColor();
             }
-            int painted = 0;
+            int painted = 0, stoned = 0;
             for (int i = 0; i < c.Structures.Count; i++)
             {
                 var s = c.Structures[i];
                 if (s?.Element == null || s.Element.Type == EType.BODY) continue;
                 string name = s.Element.Name;
-                bool own = OwnParts.Contains(name), stone = StoneParts.Contains(name);
+                // SR2 names the rock parts differently from SR1 (e.g. spine crown / spike ball): match any "Rock" part.
+                bool own = OwnParts.Contains(name),
+                     stone = StoneParts.Contains(name) || name.IndexOf("Rock", StringComparison.OrdinalIgnoreCase) >= 0;
                 var mats = s.DefaultMaterials;
                 if (own || stone)
                 {
@@ -174,6 +195,7 @@ namespace ClassicSlimes
                     if (m == null || own || (body != null && m.Pointer == body.Pointer) || !shader.StartsWith("SR/AMP/Slime/Body") || (stone && crystal))
                     { list.Add(m); continue; }
                     var copy = new Material(m) { name = m.name + (stone ? "_stone" : "_classic"), hideFlags = HideFlags.DontUnloadUnusedAsset };
+                    if (stone) stoned++;
                     Tint(copy, top, mid, bottom, identity, stone);
                     list.Add(Mat.Track(copy)); painted++;
                 }
@@ -182,7 +204,7 @@ namespace ClassicSlimes
                 c.Structures[i] = copyStructure;
             }
             if (body != null) Visuals.Mats[c.Largo.name] = Mat.Track(body);
-            ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: SR1 palette on body + {painted} part materials");
+            ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: SR1 palette on body + {painted} part materials ({stoned} stone)");
         }
 
         static Mesh BodyMesh(CottonLibrary.Forge.LargoBuild c)
@@ -214,11 +236,20 @@ namespace ClassicSlimes
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void QuantumBuild(CottonLibrary.Forge.LargoBuild c)
         {
-            if (c.IsRadiant || c.Largo == null || c.BodyMaterial == null || c.Has("Boom")) return;
-            Color top = GoldTop, mid = GoldMid, bottom = GoldBottom, band = GoldBand;
-            if (c.Has("Pink")) { top = PinkTop; mid = PinkMid; bottom = PinkBottom; band = PinkBand; }
-            else if (c.Has("Rad")) { top = LimeTop; mid = LimeMid; bottom = LimeBottom; band = LimeBand; }
-            Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), top, mid, bottom, band);
+            if (c.IsRadiant || c.Largo == null || c.BodyMaterial == null) return;
+            if (c.Has("Boom"))
+            {
+                // SR1: the red cracked Boom body with golden cracks and a lighter red spiral.
+                Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), BoomTop, BoomMid, BoomBottom);
+                c.BodyMaterial.Col("_CrackColor", new Color(1f, 0.86f, 0.12f));
+                Visuals.Mats[c.Largo.name] = Mat.Track(c.BodyMaterial);
+                ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: red body, golden cracks, SR1 spiral");
+                return;
+            }
+            Color top = GoldTop, mid = GoldMid, bottom = GoldBottom;
+            if (c.Has("Pink")) { top = PinkTop; mid = PinkMid; bottom = PinkBottom; }
+            else if (c.Has("Rad")) { top = LimeTop; mid = LimeMid; bottom = LimeBottom; }
+            Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), top, mid, bottom);
             Paint(c, top, mid, bottom, 0.12f);
         }
 
@@ -246,8 +277,9 @@ namespace ClassicSlimes
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Pink").Body("Pink").ColorsOf("Pink");
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Boom").Body("Boom").ColorsOf("Boom");
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Mosaic").ColorsOf("Quantum");
-            // Mosaic: the partner's body and colours; MosaicLargo turns the body AND its parts into coated glass tiles.
-            CottonLibrary.Forge.LargoStyle.Of("Mosaic").Body(Low).Face(Low).KeepOwnColors("*");
+            // Mosaic: the partner's body and colours (SR1: a pink, red, amber ... mosaic, not a blue blend); MosaicLargo turns
+            // the body AND its parts into coated, shimmering glass tiles. "Second" = the other parent's palette.
+            CottonLibrary.Forge.LargoStyle.Of("Mosaic").Body(Low).Face(Low).Colors(CottonLibrary.Forge.LargoColorMode.Second).KeepOwnColors("*");
         }
     }
 }

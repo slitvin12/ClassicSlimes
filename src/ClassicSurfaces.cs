@@ -37,6 +37,7 @@ namespace ClassicSlimes
                 m.Flt("_NormalPanX", 0f); m.Flt("_NormalPanY", 0f);
                 m.SetTextureScale("_Normal", Vector2.one); m.SetTextureOffset("_Normal", Vector2.zero);
             }
+            Color[] ramp = { top, mid, bottom };
             if (recolor)
             {
                 m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
@@ -47,24 +48,82 @@ namespace ClassicSlimes
                     Color.Lerp(new Color(0.06f, 0.16f, 0.40f), mid, tint),
                     Color.Lerp(new Color(0.05f, 0.12f, 0.32f), bottom, tint));
                 string[] channels = { "Red", "Green", "Blue" };
-                var colors = new[] { new Color(0.08f, 0.38f, 0.98f), new Color(0.06f, 0.78f, 0.38f), new Color(1f, 0.40f, 0.035f) };
+                var colors = MosaicTileColors;
                 for (int i = 0; i < channels.Length; i++)
                 {
                     // Height is already in the smooth mask; constant channel colours avoid a second, misaligned ramp.
                     m.Col("_" + channels[i] + "TopColor", Color.Lerp(colors[i], top, tint));
                     m.Col("_" + channels[i] + "MiddleColor", Color.Lerp(colors[i], mid, tint));
                     m.Col("_" + channels[i] + "BottomColor", Color.Lerp(colors[i], bottom, tint));
+                    ramp[i] = Color.Lerp(colors[i], ramp[i], tint);
                 }
                 m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
             }
             m.Flt("_GlossPower", 0.82f);
             m.Flt("_BodyLightingContribution", 0.85f);
             NeutralScatter(m);
+            MosaicShimmer(m, ramp[0], ramp[1], ramp[2], tint > 0f ? MosaicLargoShimmer : MosaicBaseShimmer);
             Mat.Track(m);
         }
 
+        /// <summary>Blue / emerald / amber glass of the base Mosaic slime (one per mask channel).</summary>
+        static readonly Color[] MosaicTileColors = { new(0.08f, 0.38f, 0.98f), new(0.06f, 0.78f, 0.38f), new(1f, 0.40f, 0.035f) };
+
+        /// <summary>
+        /// Strength of the rainbow shimmer (SR2 radiant effect, 0 = off, 1 = a fully holographic radiant body) on the base
+        /// Mosaic and on mosaic largos, and how much of the hue wheel is mixed into the slime's own tile colours.
+        /// Tuned in game against the SR1 guide: the tiles keep their colour, rainbow tints run over them with the view.
+        /// </summary>
+        public static float MosaicBaseShimmer = 0.25f, MosaicLargoShimmer = 0.15f, MosaicShimmerRainbow = 0.4f;
+
+        static bool _shimmerWarned;
+
+        /// <summary>
+        /// SR1's SR/Slime/Mosaic runs the glass through a hue ramp (tarr_ramp) as the view angle changes. SR2's slime body
+        /// shader has the same kind of effect for radiant slimes: noise + parallax picking colours from a ramp. Forced at
+        /// part strength with a ramp of the slime's own colours mixed with a hue wheel, the tiles keep their colour and
+        /// shimmer in rainbow tints. A radiant variant keeps its own, full radiant look.
+        /// </summary>
+        internal static void MosaicShimmer(Material m, Color a, Color b, Color c, float force)
+        {
+            if (m == null || force <= 0f || !m.HasProperty("_ForceRadiantEffect") || m.IsKeywordEnabled("_ENABLERADIANTEFFECT_ON")) return;
+            var src = Mat.Find("slimePinkBaseRadiant");
+            if (src == null || !src.HasProperty("_RadiantNoisePattern"))
+            {
+                if (!_shimmerWarned) ClassicSlimesMod.Log.Warning("Mosaic shimmer: no slimePinkBaseRadiant material, glass stays without rainbow tiles");
+                _shimmerWarned = true;
+                return;
+            }
+            foreach (var p in new[] { "_RadiantNoisePattern", "_RadiantParallaxPattern", "_RadiantFresnelGradient" }) m.Tx(p, src.GetTexture(p));
+            foreach (var p in new[] { "_ParallaxRadiant", "_NoiseIntensityRadiant", "_RadiantEmissionAmount" }) m.Flt(p, src.GetFloat(p));
+            m.Tx("_ColorShiftGradient", ShimmerRamp(a, b, c));
+            m.Kw("_ENABLERADIANTEFFECT_ON", true); m.Flt("_EnableRadiantEffect", 1f);
+            m.Kw("_TOGGLERADIANTEFFECT_ON", true); m.Flt("_ToggleRadiantEffect", 1f);
+            m.Flt("_ForceRadiantEffect", force);
+        }
+
+        /// <summary>128x1 sRGB ramp: the three colours in a loop, mixed with two turns of the hue wheel (SR1 tarr_ramp).</summary>
+        static Texture2D ShimmerRamp(Color a, Color b, Color c)
+        {
+            // ColorUtility is stripped from the game build ("Method unstripping failed"), so the key is built by hand.
+            static string Hex(Color x) => $"{B(x.r):X2}{B(x.g):X2}{B(x.b):X2}";
+            static int B(float v) => (int)(Mathf.Clamp01(v) * 255f + 0.5f);
+            float k = Mathf.Clamp01(MosaicShimmerRainbow);
+            var cols = new[] { a, b, c, a };
+            return Gfx.Generated($"mosaicRamp_{Hex(a)}{Hex(b)}{Hex(c)}_{k:0.00}", 128, 1, (x, y) =>
+            {
+                float t = x / 127f * 3f;
+                int i = Mathf.Min((int)t, 2);
+                var own = Color.Lerp(cols[i], cols[i + 1], t - i);
+                var hue = Color.HSVToRGB(x / 64f % 1f, 1f, 1f);
+                var r = Color.Lerp(own, hue, k);
+                r.a = 1f;
+                return r;
+            }, false);
+        }
+
         /// <summary>Share of the largo's own (partner) colours in its mosaic tiles; the rest is the blue/emerald/amber glass.</summary>
-        public static float MosaicLargoTint = 0.8f;
+        public static float MosaicLargoTint = 0.9f;
 
         // Effects, auras and orbiting bits are not glass in SR1: they keep their material and get no coat.
         static readonly HashSet<string> MosaicBare = new(StringComparer.OrdinalIgnoreCase)
@@ -143,9 +202,13 @@ namespace ClassicSlimes
             if (parts > 0) ClassicSlimesMod.Log.Msg($"[mosaic] {app.name}: {bodies.Count} body + {parts} parts in glass");
         }
 
+        /// <summary>How much lighter the SR1 spiral is than the quantum largo body (top level, towards white).</summary>
+        public static float QuantumBandLift = 0.4f;
+
         // SR1 quantum largo body: one palette and the single SR1 spiral band, baked into this body mesh's UVs.
         // Crack / stripe keywords of the partner body stay; Sloomber's star mode excludes MULTI (palette only).
-        internal static void QuantumSurface(Material m, Mesh mesh, Color top, Color mid, Color bottom, Color band)
+        // The band is a lighter shade of the body at every height (SR1: a glossy lemon slime, not a white stripe).
+        internal static void QuantumSurface(Material m, Mesh mesh, Color top, Color mid, Color bottom)
         {
             if (m == null) return;
             m.Palette(top, mid, bottom);
@@ -169,13 +232,15 @@ namespace ClassicSlimes
                 m.SetTextureScale("_ColorMask", Gfx.SwirlScale); m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
                 m.Flt("_ColorMaskUV1", 0f);
             }
-            m.Col("_RedTopColor", band); m.Col("_RedMiddleColor", band); m.Col("_RedBottomColor", band);
+            m.Col("_RedTopColor", Color.Lerp(top, Color.white, QuantumBandLift));
+            m.Col("_RedMiddleColor", Color.Lerp(mid, top, 0.65f));
+            m.Col("_RedBottomColor", Color.Lerp(bottom, mid, 0.65f));
             foreach (var ch in new[] { "Green", "Blue" })
             {
                 m.Col("_" + ch + "TopColor", top); m.Col("_" + ch + "MiddleColor", mid); m.Col("_" + ch + "BottomColor", bottom);
             }
             m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
-            m.Flt("_GlossPower", 0.6f);
+            m.Flt("_GlossPower", 0.72f);
             Mat.Track(m);
         }
     }

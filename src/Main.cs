@@ -5,7 +5,7 @@ using Il2CppInterop.Runtime.Injection;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.2.0", "ClassicSlimes")]
+[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.2.1", "ClassicSlimes")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 [assembly: MelonAdditionalDependencies("CottonLibrary")]
 

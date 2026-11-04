@@ -435,6 +435,8 @@ namespace ClassicSlimes
         static List<Material> Tune(string key)
         {
             var r = new List<Material>();
+            bool contains = key.Length > 2 && key.StartsWith("*") && key.EndsWith("*");   // *part*: name contains part
+            if (contains) key = key.Substring(1);
             bool prefix = key.Length > 1 && key.EndsWith("*");
             if (prefix) key = key.Substring(0, key.Length - 1);
             if (Visuals.Mats.TryGetValue(key, out var m) && m != null) r.Add(m);
@@ -443,7 +445,8 @@ namespace ClassicSlimes
             {
                 if (x == null || r.Contains(x)) continue;
                 var n = x.name;
-                if (n == key || (prefix && n.StartsWith(key, StringComparison.Ordinal)) || (clone != null && n.StartsWith(clone, StringComparison.Ordinal))) r.Add(x);
+                if (n == key || (prefix && (contains ? n.Contains(key, StringComparison.Ordinal) : n.StartsWith(key, StringComparison.Ordinal)))
+                    || (clone != null && n.StartsWith(clone, StringComparison.Ordinal))) r.Add(x);
             }
             if (r.Count == 0) ClassicSlimesMod.Log.Warning("[cmd] no material " + key);
             return r;

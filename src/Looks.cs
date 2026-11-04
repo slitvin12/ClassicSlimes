@@ -438,7 +438,8 @@ namespace ClassicSlimes
             // clear glossy coat over the coloured tiles: a thin glass rim + faceted highlights, no milky haze.
             // Daylight-tuned: opacity / metallic / a wide fresnel (power 2.2) washed the tiles out to pastel, and the
             // stock fresnel blur (0.39) smeared the refracted background into a broad white halo around the slime.
-            m.Col("_Color", new Color(0.65f, 0.88f, 1f, 0f));
+            // neutral (SR1 _GlassColor is grey): a blue tint turned every mosaic largo blue / lavender
+            m.Col("_Color", new Color(1f, 1f, 1f, 0f));
             m.Flt("_Opacity", 0.04f);
             m.Flt("_Smoothness", 1f);
             m.Flt("_Metallic", 0f);
