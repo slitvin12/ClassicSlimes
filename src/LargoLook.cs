@@ -226,9 +226,23 @@ namespace ClassicSlimes
         static void RadBuild(CottonLibrary.Forge.LargoBuild c)
         {
             Visuals.RadLargoSurface(c.BodyMaterial, c.Has("Phosphor"));
+            ApplyRadFace(c);
             if (c.IsRadiant || c.Largo == null) return;
             if (c.Has("Pink") || c.Has("Boom") || c.Has("Phosphor") || c.Has("Honey") || c.Has("Quantum")) return;
             Paint(c, RadTop, RadMid, RadBottom, 0.12f);
+        }
+
+        // SR1: every rad largo has small glowing yellow eyes and a dark red mouth, whatever the partner's face.
+        static void ApplyRadFace(CottonLibrary.Forge.LargoBuild c)
+        {
+            var app = c.Appearance;
+            if (app == null || app._face == null || app._face.name.EndsWith("_RadLargo")) return;
+            var src = app._face.name;
+            var f = Visuals.RadLargoFace(app._face);
+            if (f == null) return;
+            app._face = f;
+            if (!c.IsRadiant && c.Largo != null)
+                ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: SR1 rad face (yellow eyes, dark red mouth) on {src}");
         }
 
         // Quantum: golden body with the SR1 swirl, golden partner parts. Pink stays pink and Rad lime (with the swirl),

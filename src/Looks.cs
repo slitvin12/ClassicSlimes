@@ -96,6 +96,47 @@ namespace ClassicSlimes
             return _radFace;
         }
 
+        /// <summary>SR1 rad largos (whatever the partner): small glowing yellow eyes and a dark red mouth on the
+        /// partner's face shapes. Stock SR2 faces drew black eyes that the green rad glow turned green.</summary>
+        public static readonly Color[] RadLargoEye =
+        {
+            new Color(0.90f, 1f, 0.20f, 1f), new Color(0.98f, 1f, 0.55f, 1f), new Color(1f, 1f, 0.88f, 1f)
+        };
+        public static readonly Color[] RadLargoMouth =
+        {
+            new Color(0.16f, 0.01f, 0.03f, 1f), new Color(0.40f, 0.02f, 0.07f, 1f), new Color(0.60f, 0.06f, 0.10f, 1f)
+        };
+        static readonly Dictionary<string, SlimeFace> _radLargoFaces = new();
+
+        internal static SlimeFace RadLargoFace(SlimeFace src)
+        {
+            if (src == null || src.name.EndsWith("_RadLargo")) return src;
+            if (_radLargoFaces.TryGetValue(src.name, out var f) && f != null) return f;
+            f = Faces.Clone(src, src.name + "_RadLargo",
+                e =>
+                {
+                    var m = GlowFaceMat(e, true, "_RadLargo");
+                    m.Col("_EyeRed", RadLargoEye[0]);
+                    m.Col("_EyeGreen", RadLargoEye[1]);
+                    m.Col("_EyeBlue", RadLargoEye[2]);
+                    m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));
+                    Mats["RadLargoEyes_" + e.name] = m;
+                    return m;
+                },
+                mo =>
+                {
+                    var m = GlowFaceMat(mo, false, "_RadLargo");
+                    m.Col("_MouthTop", RadLargoMouth[0]);
+                    m.Col("_MouthMid", RadLargoMouth[1]);
+                    m.Col("_MouthBot", RadLargoMouth[2]);
+                    m.Col("_GlowColor", new Color(0f, 0f, 0f, 1f));
+                    Mats["RadLargoMouth_" + mo.name] = m;
+                    return m;
+                });
+            if (f != null) _radLargoFaces[src.name] = f;
+            return f ?? src;
+        }
+
         static SlimeFace _quantumFace;
         public static SlimeFace QuantumFace(SlimeFace src)
         {
