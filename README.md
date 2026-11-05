@@ -16,11 +16,11 @@
    `CottonLibrary.dll` одновременно нельзя). CottonForge — прямая замена: другие Cotton-моды работают без пересборки.
 3. Скачать `ClassicSlimes.dll` из [релиза](https://github.com/slitvin12/ClassicSlimes/releases/latest) и положить
    туда же. Итог: `Mods\CottonLibrary.dll` + `Mods\ClassicSlimes.dll`.
-4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.2.3`.
+4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.0`.
    Первый показ главного меню на ~10 с дольше обычного — генерируются ларго.
 
-Версии 1.2.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
-должен запускаться без этих стилей, но такая связка в 1.2.x не проверялась.
+Версии 1.2.x–1.3.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
+должен запускаться без этих стилей, но такая связка в 1.2.x–1.3.x не проверялась.
 Удаление — убрать `ClassicSlimes.dll`; слаймы и ларго мода при этом пропадут из сохранения (см. «Известные проблемы»).
 
 ## Что добавлено
@@ -63,6 +63,22 @@
 умолчанию включено) расширяет табло: занимает пустой 10-й столбец и дополняет короткие столбцы — видны все
 29 позиций, включая плорты Rad, Quantum, Mosaic и Quicksilver. Плорт мода открывается на табло
 (вместо «?» появляются иконка и цена) после первой продажи.
+
+### Гордо из SR1
+Как в SR1, у Rad, Quantum и Mosaic есть свои гордо (`ClassicGordos`, по умолчанию включено) — по одному, на
+постоянных местах рядом с домами своего слайма (в скобках — координаты для dev-команды `goto`):
+
+| Гордо | Где | Диета |
+|---|---|---|
+| Rad | Starlight Strand: луг с синей травой у тропы, ~100 м от ворот из Conservatory (18, 2, −218) | овощи |
+| Quantum | Powderfall Bluffs: снежная ложбина с ледяными глыбами и фруктовым деревом (−844, 44, 1459) | фрукты |
+| Mosaic | Ember Valley: песчаное плато между скальными столбами, ~25 м от Rock-гордо (−319, 35, 554) | овощи |
+
+Тело и лицо — как у слайма мода, названия — «Радиоактивный / Квантовый / Мозаичный гордо» (EN/RU), в слаймопедии —
+общая статья «Гордо». Rad-гордо, как gordoRad в SR1, окружён радиационной аурой (радиус 12,8 м, растёт вместе с
+гордо, без периодических расширений). Съев `GordoFoodCount` штук еды (по умолчанию 50, как в SR1), гордо лопается:
+вылетают слаймы его типа (в тесте — 12) и ящик его зоны. Сколько съедено и лопнул ли гордо, хранится в сохранении,
+как у ванильных гордо; лопнувший больше не появляется.
 
 ### Внешний вид
 - **Rad** — насыщенное ярко-зелёное светящееся тело со светлым ободком, лаймовые глаза и одна ровная лаймовая улыбка (как в
@@ -128,7 +144,7 @@
 `RadAuraDamagesPlayer`, `RadHaze`; `QuantumTeleports`, `QuantumHologram`, `QuantumPhaseWalls`, `QuantumJelly`;
 `MosaicGlints`, `MosaicGlintFire`, `MosaicJelly`; `GlitchDisguise`, `GlitchDebugReward`; `GlitchSR1Face`; `GlitchTrail`;
 `GlitchFlees`; `QuicksilverShockDamage`, `QuicksilverRuns`; `EnableSR1Foods`, `WildSR1Foods`,
-`WildSR1FoodPatchShare`, `PhaseLemonTrees`; `BiggerMarketBoard`; `RadiationMeter`, `RadRecoveryPerSecond`, `RadDomeStyle` (0 — преломляющая сфера
+`WildSR1FoodPatchShare`, `PhaseLemonTrees`; `BiggerMarketBoard`; `ClassicGordos`, `GordoFoodCount`; `RadiationMeter`, `RadRecoveryPerSecond`, `RadDomeStyle` (0 — преломляющая сфера
 (по умолчанию), 1 — пузырь в стиле SR2 с пузырьками, 2–7 — другие варианты купола); `PauseGcDuringLoad` — пауза GC на время генерации ларго
 (см. «Известные проблемы»); `Diagnostics` — режим разработчика.
 
@@ -194,6 +210,10 @@
   становился пурпурным (материал-ошибка). Теперь `Destroy` для общих материалов лиц мода пропускается
   (`DestroyGuard` в `Hooks.cs`), плюс раз в 2 с проверяются и восстанавливаются слоты лиц (`Faces.Tick`).
 
+- **Гордо мода и удаление мода.** Модели гордо мода (id `gordoClassicRad` / `…Quantum` / `…Mosaic`, сколько съедено,
+  номер типа) остаются в сохранении. Как игра без мода прочитает такой сейв, не проверялось — перед удалением мода
+  сделайте копию сохранения.
+
 ## Режим разработчика
 Включается `Diagnostics = true` или файлом `UserData\ClassicSlimes\diag.enabled`. Тогда мод пишет дампы
 (slimes/materials/shaders/prefabs/runtime.txt) и раз в 0,5 с читает команды из `UserData\ClassicSlimes\cmd.txt`:
@@ -232,7 +252,13 @@
 ртутного (скорость, выносливость, бегство, подъём); `qsaim [сек]` — имитация пылесоса по направлению взгляда;
 `pediashot <ident> [поворот] [наклон] [заполнение] [имя]` — снимки модели для слаймопедии
 (на чёрном и белом фоне); `pedialist` / `pediaimgs` — статьи / картинки открытой слаймопедии в файл;
-`pediaclose` — закрыть слаймопедию; `face <yaw> [pitch]` / `face x y z` — повернуть камеру (к точке).
+`pediaclose` — закрыть слаймопедию; `face <yaw> [pitch]` / `face x y z` — повернуть камеру (к точке);
+`gordos` — гордо загруженных сцен, ближайшие первыми (модели в сохранении, награды; у ближайшего — что лежит
+рядом) → `gordos.txt`; `gordotree [near|Rad|PinkGordo]` — иерархия и материалы гордо → `gordotree.txt`;
+`gordohere [слайм] [дист]` / `gordoat x y z [слайм] [поворот]` — поставить тестового гордо (id `gordoClassicTest…`);
+`gordoclear` — убрать тестовых гордо и их модели; `gordospots [слайм] [N]` — кандидаты мест для гордо у домов
+слайма → `gordospots.txt`; `gordofeed [N]` — ближайшему гордо осталось съесть N; `gordofood [еда|-] [N]` — бросить
+еду ему в рот; `gordoreset [id]` — вернуть лопнувших гордо мода; `savegame` — сохранить игру.
 
 ## Сборка
 ```
@@ -249,7 +275,7 @@ dotnet build -c Release -p:Deploy=true -p:SR2Dir="D:\SteamLibrary\steamapps\comm
   `Spawns.cs`, `Loc.cs` (локализация), `Visuals.cs` (материалы и меши SR1 на шейдерах SR2), `Looks.cs`
   (внешний вид Rad/Mosaic/Glitch: тела, лица, купол, оболочка, искры), `ClassicSurfaces.cs` (деформируемая плитка
   Mosaic и поверхность Rad-ларго), `LargoLook.cs` (стили форка и эталонные рецепты SR1), `Faces.cs` (клоны лиц SR2 и их защита),
-  `Gfx.cs` (процедурные меши, текстуры и частицы), `Foods.cs` (еда SR1, дикие места, лимонные деревья), `RadHud.cs` (шкала облучения),
+  `Gfx.cs` (процедурные меши, текстуры и частицы), `Foods.cs` (еда SR1, дикие места, лимонные деревья), `Gordos.cs` (гордо SR1: типы, места, награды), `RadHud.cs` (шкала облучения),
   `Behaviours.cs` (механики), `Jelly.cs` (пружинящее «желе» слаймов со стеклом), `Hooks.cs` (Harmony: вода, еда, защита материалов лиц), `SaveGuard.cs`,
   `Pedia.cs` (арт слаймопедии), `Market.cs` (табло рынка), `PediaShot.cs` (снимки для слаймопедии), `DevCmd.cs`, `Experiments.cs` (эксперименты с материалами, объёмная спираль
   квантового), `Swirl.cs` (нарисованная спираль), `Diag.cs`/`DiagX.cs`, `Cfg.cs`, `Util.cs`, `Res.cs`;

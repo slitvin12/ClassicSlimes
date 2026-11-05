@@ -130,6 +130,16 @@ namespace ClassicSlimes
                     break;
                 case "garden": L(Foods.GardenInfo()); break;   // plantable state of the nearest garden (SR1 foods + carrot / pogo)
                 case "homes": L(Spawns.HomesInfo()); break;   // home spawners of the classic slimes, nearest first
+                case "gordos": L(Gordos.Info()); break;   // gordos of the loaded scenes, nearest first -> gordos.txt
+                case "gordotree": L(Gordos.Tree(a.Length > 1 ? a[1] : "near")); break;   // gordotree [near|Rad|PinkGordo]: hierarchy + materials -> gordotree.txt
+                case "gordohere": L(Gordos.Here(a.Length > 1 ? a[1] : "Rad", F(a, 2, 8f))); break;   // gordohere [slime] [dist]: test gordo on the ground ahead
+                case "gordoat": L(Gordos.At(a.Length > 4 ? a[4] : "Rad", new Vector3(F(a, 1, 0f), F(a, 2, 0f), F(a, 3, 0f)), F(a, 5, float.NaN))); break;   // gordoat x y z [slime] [yaw]
+                case "gordoclear": L(Gordos.ClearTests()); break;   // remove the test gordos and their models
+                case "gordospots": L(Gordos.Candidates(a.Length > 1 ? a[1] : "Rad", (int)F(a, 2, 6f))); break;   // gordospots [slime] [n]: candidate spots -> gordospots.txt
+                case "gordofeed": L(Gordos.Feed((int)F(a, 1, 1f))); break;   // gordofeed [left]: the nearest gordo needs only `left` more foods
+                case "gordofood": L(Gordos.Food(a.Length > 1 ? a[1] : "-", (int)F(a, 2, 1f))); break;   // gordofood [ident|-] [n]: drop foods into its mouth
+                case "gordoreset": L(Gordos.Reset(a.Length > 1 ? a[1] : null)); break;   // gordoreset [id]: un-burst our gordos
+                case "savegame": GameContext.Instance.AutoSaveDirector.SaveGameAndFlush(); L("savegame: saved"); break;
                 case "foodspots": L(Foods.FoodSpots()); break;   // wild SR1 food patches / trees, nearest first
                 case "market": L(Market.Info()); break;   // classic plort prices + market board slots
                 case "marketui": L(Market.DumpUI()); break;

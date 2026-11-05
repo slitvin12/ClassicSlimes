@@ -24,6 +24,8 @@ namespace ClassicSlimes
         public static MelonPreferences_Entry<float> WildFoodShare, RadRecoveryPerSecond;
         public static MelonPreferences_Entry<int> RadDomeStyle;
         public static MelonPreferences_Entry<bool> RadHaze, GlitchFlees, QuicksilverRuns, MosaicJelly, QuantumJelly, SpawnHomes, MarketBoard;
+        public static MelonPreferences_Entry<bool> ClassicGordos;
+        public static MelonPreferences_Entry<int> GordoFood;
 
         public static void Init()
         {
@@ -72,6 +74,8 @@ namespace ClassicSlimes
             QuicksilverRuns = Cat.CreateEntry("QuicksilverRuns", true, "Quicksilver slimes never hop: they race along the ground");
             MosaicJelly = Cat.CreateEntry("MosaicJelly", true, "Whole-root jelly for the legacy separate Mosaic glass shell only; the default native surface keeps SR2 contact squash");
             QuantumJelly = Cat.CreateEntry("QuantumJelly", true, "Quantum slimes are see-through golden jelly with the SR1 spiral inside (off: opaque body with a painted spiral)");
+            ClassicGordos = Cat.CreateEntry("ClassicGordos", true, "SR1 gordos of the classic slimes: a Rad, a Quantum and a Mosaic gordo at fixed spots of their zones (eaten count and burst are saved like a vanilla gordo)");
+            GordoFood = Cat.CreateEntry("GordoFoodCount", 50, "Foods a classic gordo eats before it bursts (SR1 value: 50)");
         }
     }
 }

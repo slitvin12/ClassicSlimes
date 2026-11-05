@@ -71,6 +71,7 @@ namespace ClassicSlimes
         const float AuraScale = 6.4f;
         const float CoreRatio = 0.62f;
         public static readonly List<RadSlime> All = new();
+        public bool NoExpand;
 
         void OnDestroy() => All.Remove(this);
 
@@ -173,7 +174,7 @@ namespace ClassicSlimes
             bool calmed = _calm != null && _calm.IsCalmed();
             bool held = _vac != null && _vac.IsHeld();
             if (calmed) _nextExpand += dt;
-            else if (Time.time >= _nextExpand && Time.time >= _expandedUntil)
+            else if (!NoExpand && Time.time >= _nextExpand && Time.time >= _expandedUntil)
             {
                 _expandedUntil = Time.time + ExpandingTime + ExpandedTime;
                 _nextExpand = _expandedUntil + Delay();

@@ -120,6 +120,15 @@ namespace ClassicSlimes
                 + string.Join("", live.Take(15).Select(x => $" | {x.d:0} m {x.s}"));
         }
 
+        /// <summary>Loaded home spawners of a classic slime (gordo spot search).</summary>
+        internal static List<(Vector3 pos, string scene)> HomesOf(string slime)
+        {
+            var r = new List<(Vector3, string)>();
+            foreach (var h in _homes)
+                if (h.sp != null && h.names.Split('+').Contains(slime)) r.Add((h.sp.transform.position, h.scene));
+            return r;
+        }
+
         static bool IsWildSlimeSpawner(DirectedActorSpawner spawner) =>
             spawner.TryCast<DirectedSlimeSpawner>() != null && spawner.TryCast<DirectedAnimalSpawner>() == null;
 
