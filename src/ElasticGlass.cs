@@ -57,9 +57,15 @@ namespace ClassicSlimes
                 // Angler fins, Flutter wings) get a GPU coat instead: the original mesh (skinned by the same bones), no warp.
                 bool gpu = !src.isReadable;
                 if (gpu && Unreadable.Add(src.name)) ClassicSlimesMod.Log.Msg($"Elastic mosaic glass: mesh {src.name} ({m.name}) is not readable, rigid GPU coat");
-                // the plain Mosaic slime: SR1's facet shell over the smooth body (SlimeFacets); largos keep the tile coat
+                // SR1's facet shell (SlimeFacets): the plain Mosaic slime over its smooth body; a largo on its body only (ears,
+                // tails and other parts keep the smooth coat), its tile surfaces smooth under the glass
                 bool facet = false;
                 if (!gpu && SlimeFacets.IsPlainBody(m)) { m = SlimeFacets.SwapBody(r, m); facet = SlimeFacets.On; }
+                else if (SlimeFacets.IsLargoSurface(m))
+                {
+                    m = SlimeFacets.SwapLargo(r, m);
+                    facet = !gpu && SlimeFacets.On && SlimeFacets.Largos && SlimeFacets.IsBodyMesh(_root, src);
+                }
                 seen.Add(r.Pointer);
                 bool found = false;
                 for (int i = _coats.Count - 1; i >= 0; i--)
@@ -179,7 +185,7 @@ namespace ClassicSlimes
                 bool warp = !held && !c.Rigid;
                 if (c.Shell != null)
                 {
-                    // plain Mosaic slime: the SR1 facet shell rides on the baked body's triangles, then gets the same warp
+                    // Mosaic slime / largo body: the SR1 facet shell rides on the baked body's triangles, then gets the same warp
                     var sh = c.Shell;
                     sh.Place(vs);
                     var ps = sh.Positions; var pn = sh.Normals; var lift = sh.Lift;
@@ -262,7 +268,7 @@ namespace ClassicSlimes
             internal Material Material;
             /// <summary>The source shader has no slime vertex warp ("_NoWobble" parts): the coat must not warp either.</summary>
             internal readonly bool Rigid;
-            /// <summary>Plain Mosaic slime (SlimeFacets): Shell = the SR1 facet shell, drawn instead of the body copy (null: its fit failed).</summary>
+            /// <summary>Mosaic slime / largo body (SlimeFacets): Shell = the SR1 facet shell, drawn instead of the body copy (null: its fit failed).</summary>
             internal readonly bool Facet;
             internal readonly int Version;
             internal readonly SlimeFacets.Shell Shell;

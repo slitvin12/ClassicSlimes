@@ -19,7 +19,8 @@ namespace ClassicSlimes
     /// Elastic: the shell is not skinned to SR1's six bones. Every shell vertex rides on the nearest triangle of the
     /// slime's own body (found once per body mesh in its rest pose), so it follows the baked body every frame (bones,
     /// jumps, eating), then gets the same SR2 shader wobble / contact squash as the elastic glass coat (ElasticGlassRig).
-    /// Largos keep the tile body and its elastic coat.
+    /// Largos (Largos): the shell on their body only (ears, tails and other parts keep the smooth elastic coat), and under
+    /// the glass their tile surfaces turn smooth in the largo's own colours (Body).
     /// </summary>
     public static class SlimeFacets
     {
@@ -28,8 +29,11 @@ namespace ClassicSlimes
         public static float Scale = 1f;
         /// <summary>Minimum gap between the shell and the body, relative to the body height (the body never pokes through).</summary>
         public static float Gap = 0.01f;
-        /// <summary>Body under the facets: "smooth" (the Mosaic gordo's SR1 gradient) or "tiles" (the Mosaic slime's tile body).</summary>
+        /// <summary>Body under the facets: "smooth" (the Mosaic gordo's SR1 gradient; largos: their own colours, parts too) or
+        /// "tiles" (the Mosaic slime's tile body, the largos' tiles).</summary>
         public static string Body = "smooth";
+        /// <summary>The facet shell on the Mosaic largos too.</summary>
+        public static bool Largos = true;
         /// <summary>Shell mesh: "mosaic_LOD0" (SR1's Mosaic slime: the same 115 facets, slime-shaped) or "mosaicGordo_LOD0" (the gordo's shell).</summary>
         public static string ShellMesh = "mosaic_LOD0";
         /// <summary>Shells without an SR1 body to fit against (mosaic_LOD0 was SR1's body itself): the shell's box over the body's box.</summary>
@@ -58,6 +62,101 @@ namespace ClassicSlimes
             mats[0] = want;
             r.sharedMaterials = mats;
             return want;
+        }
+
+        /// <summary>A Mosaic largo surface: its body (MosaicNative) or part (MosaicPart) material, or the smooth copy of one.</summary>
+        internal static bool IsLargoSurface(Material m) =>
+            m != null && (TileOriginals.ContainsKey(m.Pointer) || m.name.Contains("_MosaicNative") || m.name.Contains("_MosaicPart"));
+
+        /// <summary>Under a largo's facets its tile surfaces (body and parts) turn smooth in the largo's own colours (Body
+        /// "smooth"), so only the glass shimmers; otherwise, or with the facets off, the tiles come back.</summary>
+        internal static Material SwapLargo(Renderer r, Material m)
+        {
+            var tile = TileOriginals.TryGetValue(m.Pointer, out var t) && t != null ? t : m;
+            var want = On && Largos && Body == "smooth" ? SmoothCopy(tile) : tile;
+            if (want == null || want == m) return m;
+            var mats = r.sharedMaterials;
+            if (mats == null || mats.Length == 0) return m;
+            mats[0] = want;
+            r.sharedMaterials = mats;
+            return want;
+        }
+
+        static readonly Dictionary<IntPtr, Material> SmoothCopies = new(), TileOriginals = new();
+
+        /// <summary>
+        /// The smooth copy of a largo tile surface (ClassicSurfaces.MosaicSurface): SR2 default body colouring (the largo
+        /// palette: top / middle / bottom) instead of the mosaic mask, no tile bevels, no rainbow tiles (GordoFacets.Shimmer).
+        /// Stripes, cracks, ringtail rings and the radiant look of a radiant largo stay.
+        /// Only the slime body shaders are changed: SR/AMP/Slime/Body and SR/AMP/Slime/Body_NoWobble (parts without warp).
+        /// </summary>
+        static Material SmoothCopy(Material tile)
+        {
+            if (SmoothCopies.TryGetValue(tile.Pointer, out var s) && s != null) return s;
+            s = tile;
+            if (tile.shader != null && (tile.shader.name == "SR/AMP/Slime/Body" || tile.shader.name == "SR/AMP/Slime/Body_NoWobble"))
+            {
+                bool mask = tile.IsKeywordEnabled("_BODYCOLORING_MULTI") && TexName(tile, "_ColorMask").Contains("msk_mosaic");
+                bool bevels = TexName(tile, "_Normal").Contains("nrm_mosaic");
+                bool shimmer = TexName(tile, "_ColorShiftGradient").Contains("mosaicRamp_");
+                if (mask || bevels || shimmer)
+                {
+                    s = Object.Instantiate(tile);
+                    s.name = tile.name + "_Smooth";
+                    s.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                    if (mask) { s.Kw("_BODYCOLORING_MULTI", false); s.Kw("_BODYCOLORING_DEFAULT", true); s.Flt("_BodyColoring", 0f); }
+                    if (bevels) { s.Kw("_ENABLENORMALS_ON", false); s.Flt("_EnableNormals", 0f); }
+                    if (shimmer && !GordoFacets.Shimmer)
+                    {
+                        s.Kw("_ENABLERADIANTEFFECT_ON", false); s.Kw("_TOGGLERADIANTEFFECT_ON", false);
+                        s.Flt("_EnableRadiantEffect", 0f); s.Flt("_ToggleRadiantEffect", 0f); s.Flt("_ForceRadiantEffect", 0f);
+                    }
+                    Mat.Track(s);
+                    TileOriginals[s.Pointer] = tile;
+                }
+            }
+            SmoothCopies[tile.Pointer] = s;
+            return s;
+        }
+
+        static string TexName(Material m, string p)
+        {
+            if (!m.HasProperty(p)) return "";
+            var t = m.GetTexture(p);
+            return t != null ? t.name : "";
+        }
+
+        static readonly Dictionary<IntPtr, HashSet<int>> BodyMeshSets = new();
+
+        /// <summary>A body mesh (any LOD) of the slime's live appearance: a largo's facet shell goes on its body only.</summary>
+        internal static bool IsBodyMesh(Transform root, Mesh mesh)
+        {
+            if (root == null || mesh == null) return false;
+            var app = root.GetComponent<Il2Cpp.SlimeAppearanceApplicator>();
+            var look = app != null ? app.Appearance : null;
+            if (look == null) return false;
+            if (!BodyMeshSets.TryGetValue(look.Pointer, out var set))
+            {
+                set = new HashSet<int>();
+                var structures = look._structures;
+                if (structures != null)
+                    foreach (var st in structures)
+                    {
+                        var el = st != null ? st.Element : null;
+                        if (el == null || el.Type != Il2Cpp.SlimeAppearanceElement.ElementType.BODY || el.Prefabs == null) continue;
+                        foreach (var p in el.Prefabs)
+                        {
+                            if (p == null) continue;
+                            var smr = p.GetComponent<SkinnedMeshRenderer>();
+                            Mesh pm = smr != null ? smr.sharedMesh : null;
+                            if (pm == null) { var mf = p.GetComponent<MeshFilter>(); if (mf != null) pm = mf.sharedMesh; }
+                            if (pm != null) set.Add(pm.GetInstanceID());
+                        }
+                    }
+                BodyMeshSets[look.Pointer] = set;
+                Log.Msg($"Mosaic slime facets: {look.name} body meshes {set.Count}");
+            }
+            return set.Contains(mesh.GetInstanceID());
         }
 
         /// <summary>The shell fitted to one body mesh: per shell vertex its body triangle and its place in that triangle's frame.</summary>
@@ -314,7 +413,7 @@ namespace ClassicSlimes
             return f;
         }
 
-        /// <summary>slimefacets [on|off|mesh slime|gordo|scale k|margin m|gap g|body smooth|tiles]: the SR1 facet shell of the plain Mosaic slimes.</summary>
+        /// <summary>slimefacets [on|off|largos on|off|mesh slime|gordo|scale k|margin m|gap g|body smooth|tiles]: the SR1 facet shell of the Mosaic slimes and largos.</summary>
         public static string Cmd(string[] a)
         {
             string op = a.Length > 1 ? a[1] : "info";
@@ -329,6 +428,7 @@ namespace ClassicSlimes
                 case "margin": Margin = F(2, Margin); refit = true; break;
                 case "mesh": ShellMesh = a.Length > 2 ? (a[2] == "gordo" ? GordoFacets.MeshName : a[2] == "slime" ? "mosaic_LOD0" : a[2]) : ShellMesh; refit = true; break;
                 case "body": Body = a.Length > 2 ? a[2] : Body; break;
+                case "largos": Largos = a.Length < 3 || a[2] != "off"; break;
             }
             if (refit)
             {
@@ -337,7 +437,7 @@ namespace ClassicSlimes
                 Version++;
             }
             ElasticGlassRig.Resync();
-            var sb = new StringBuilder($"slimefacets {op}: on={On} mesh={ShellMesh} scale={Scale:F3} margin={Margin:F3} gap={Gap:F3} body={Body}, {ElasticGlassRig.Census()}");
+            var sb = new StringBuilder($"slimefacets {op}: on={On} largos={Largos} mesh={ShellMesh} scale={Scale:F3} margin={Margin:F3} gap={Gap:F3} body={Body}, {ElasticGlassRig.Census()}");
             foreach (var f in Fits.Values) if (f != null) sb.Append("\n  ").Append(f.Info);
             return sb.ToString();
         }
