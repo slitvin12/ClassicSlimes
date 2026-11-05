@@ -25,6 +25,7 @@ namespace ClassicSlimes
             ClassInjector.RegisterTypeInIl2Cpp<MosaicSlime>();
             ClassInjector.RegisterTypeInIl2Cpp<QuicksilverSlime>();
             ClassInjector.RegisterTypeInIl2Cpp<GlitchSlime>();
+            ClassInjector.RegisterTypeInIl2Cpp<PhaseLemonTree>();
         }
 
         // Behaviours are NOT put on prefabs: Cotton clones/merges prefab components for every largo
@@ -532,8 +533,8 @@ namespace ClassicSlimes
         }
 
         // ------------------------------------------------------------- phasing through corral walls
-        // Not hungry -> the slime is "elsewhere" enough to drift through corral walls (collisions with every wall
-        // collider of every corral (WallUpgrader standard + upgrade walls) are ignored). Hungry again -> solid again,
+        // Hungry -> the slime is "elsewhere" enough to drift through corral walls (collisions with every wall
+        // collider of every corral (WallUpgrader standard + upgrade walls) are ignored). Fed again -> solid again,
         // but only once it is not stuck inside a wall.
         static readonly List<Collider> Walls = new();
         static readonly HashSet<IntPtr> WallSet = new();
@@ -576,7 +577,7 @@ namespace ClassicSlimes
             if (Time.time < _nextWallCheck) return;
             _nextWallCheck = Time.time + 0.3f;
             bool held = _vac != null && _vac.IsHeld();
-            bool want = Cfg.QuantumPhaseWalls.Value && !held && U.Hunger(_emo) < 0.5f;
+            bool want = Cfg.QuantumPhaseWalls.Value && !held && U.Hunger(_emo) >= 0.5f;
             if (want)
             {
                 RefreshWalls();
@@ -1002,9 +1003,18 @@ namespace ClassicSlimes
         float _yaw, _turnRate, _nextTurn, _pauseUntil, _nextPause, _goalUntil, _boostUntil;
         Vector3 _home, _goal;
         bool _homeSet;
-        public static float RunSpeed = 6.5f, ChargedSpeed = 10f, Grip = 20f, TetherRadius = 12f;
+        // chased: it outruns the rancher, jinks out of the vacuum cone and resists the vacuum until it tires out
+        // (it has to be kept in the cone for a while), runs up walls and ledges and drops down when it has to
+        float _stamina = 1f, _tiredUntil, _jinkSide = 1f, _nextJink, _climbUntil, _nextClimbRoll, _fleeUntil, _fledAt = -100f;
+        Vector3 _climbTop, _climbDir;
+        bool _noForces, _wasTired;
+        public static float RunSpeed = 9f, ChargedSpeed = 13f, FleeSpeed = 13f, MaxSpeed = 24f, Grip = 34f, FleeGrip = 55f, TetherRadius = 40f;
+        public static float FleeRadius = 12f, ResistTime = 1.4f, TiredTime = 2.8f, ClimbHeight = 5f, ClimbSpeed = 7.5f;
+        /// <summary>Dev: pretend the vacpack is sucking along the camera's view until then.</summary>
+        public static float DevAimUntil;
 
         public bool Charged => Time.time < _chargedUntil;
+        public bool Tired => Time.time < _tiredUntil;
 
         void Start()
         {
@@ -1042,74 +1052,277 @@ namespace ClassicSlimes
         /// <summary>SR2's food search (GotoConsumable) found something: race there instead of leaping.</summary>
         public void RunTo(Vector3 p) { _goal = p; _goalUntil = Time.time + 0.5f; }
 
-        /// <summary>Wall / drop ahead in that direction (look-ahead grows with speed).</summary>
-        static bool Blocked(Vector3 pos, Vector3 dir, float s, float speed)
+        enum Ahead { Clear, Wall, Drop }
+
+        static int _waterMask = -1;
+        static int WaterMask
         {
-            float look = (0.9f + speed * 0.16f) * s;
+            get
+            {
+                if (_waterMask < 0) { int w = LayerMask.NameToLayer("Water"); _waterMask = 1 << (w >= 0 ? w : 4); }
+                return _waterMask;
+            }
+        }
+
+        /// <summary>
+        /// What is ahead in that direction (look-ahead grows with speed): a wall, a drop it shouldn't take (deeper than
+        /// maxDrop body sizes, water, the void) or clear ground.
+        /// </summary>
+        static Ahead Look(Vector3 pos, Vector3 dir, float s, float speed, float maxDrop, out RaycastHit wall)
+        {
+            float look = (0.9f + speed * 0.13f) * s;
             var o = pos + Vector3.up * (0.5f * s);
-            if (Physics.SphereCast(o, 0.25f * s, dir, out var hit, look, U.GroundMask, QueryTriggerInteraction.Ignore) && hit.normal.y < 0.55f) return true;
-            return !Physics.Raycast(o + dir * look, Vector3.down, 2.1f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
+            if (Physics.SphereCast(o, 0.25f * s, dir, out wall, look, U.GroundMask, QueryTriggerInteraction.Ignore) && wall.normal.y < 0.55f) return Ahead.Wall;
+            var p = o + dir * look;
+            if (!Physics.Raycast(p, Vector3.down, out var g, maxDrop * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return Ahead.Drop;
+            if (Physics.Raycast(p, Vector3.down, g.distance, WaterMask, QueryTriggerInteraction.Collide)) return Ahead.Drop;   // water before the ground
+            return Ahead.Clear;
+        }
+
+        // the rancher as the quicksilvers see it (shared, sensed once per physics step): ground speed, the vacpack's suction
+        static float _plAt = -1f, _plSpeed, _vacRange;
+        static Vector3 _plPos, _vacEye, _vacFwd;
+        static bool _vacOn;
+        static Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem _vacItem;
+
+        static void Sense()
+        {
+            float t = Time.fixedTime;
+            if (t == _plAt) return;
+            var pl = U.Player;
+            _vacOn = false;
+            if (pl == null) { _plAt = -1f; return; }
+            var p = pl.transform.position;
+            float dt = t - _plAt;
+            if (_plAt >= 0f && dt > 0f && dt < 0.5f)
+            {
+                var d = p - _plPos; d.y = 0f;
+                float sp = d.magnitude / dt;
+                if (sp < 60f) _plSpeed = Mathf.Lerp(_plSpeed, sp, 1f - Mathf.Exp(-dt * 5f));   // (not a teleport)
+            }
+            _plAt = t; _plPos = p;
+            var cam = Camera.main;
+            if (cam == null) return;
+            try
+            {
+                if (_vacItem == null) _vacItem = SceneContext.Instance.PlayerState.VacuumItem;
+                if (_vacItem != null && _vacItem._vacMode == Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.VacMode.VAC)
+                {
+                    _vacOn = true;
+                    _vacRange = Mathf.Max(6f, _vacItem.MaxVacDist);
+                }
+            }
+            catch { _vacItem = null; }
+            if (!_vacOn && Time.time < DevAimUntil) { _vacOn = true; _vacRange = 12f; }
+            if (!_vacOn) return;
+            _vacEye = cam.transform.position;
+            _vacFwd = cam.transform.forward;
+        }
+
+        /// <summary>In the vacpack's suction cone (in range, near the aim line).</summary>
+        static bool InVac(Vector3 center)
+        {
+            if (!_vacOn) return false;
+            var to = center - _vacEye;
+            float d = to.magnitude;
+            if (d > _vacRange + 1.5f || d < 0.01f) return false;
+            return Vector3.Angle(_vacFwd, to) < (d < 3f ? 35f : 22f);
+        }
+
+        /// <summary>Stamina: drains while it is in the suction cone (it resists: no vacuum forces), then it is tired out for a moment.</summary>
+        void Stamina(float now, float dt, bool aimed, bool charged)
+        {
+            bool tired = now < _tiredUntil;
+            if (_wasTired && !tired) _stamina = 0.5f;   // got half its breath back
+            _wasTired = tired;
+            if (!tired)
+            {
+                if (aimed)
+                {
+                    _stamina -= dt / (ResistTime * (charged ? 1.6f : 1f));
+                    if (_stamina <= 0f) { _stamina = 0f; _tiredUntil = now + TiredTime * (charged ? 0.6f : 1f); tired = true; Exhausted(); }
+                }
+                else _stamina = Mathf.Min(1f, _stamina + dt / 4f);
+            }
+            SetNoForces(aimed && !tired);
+        }
+
+        void SetNoForces(bool on)
+        {
+            if (on == _noForces || _vac == null) return;
+            _noForces = on;
+            try { _vac.PreventForcesFromWeaponVacuum = on; } catch { }
+        }
+
+        void Exhausted()
+        {
+            var p = transform.position + Vector3.up * (0.6f * transform.lossyScale.x);
+            Snd.Play(Snd.QsFizzle, p);
+            if (_crackle != null) _crackle.Emit(6);
+            _boostUntil = 0f;
+            _climbUntil = 0f;
+            _zigAt = -1f;
+            if (Cfg.Diagnostics.Value) ClassicSlimesMod.Log.Msg($"Quicksilver {name} tired out");
         }
 
         /// <summary>
         /// The runner: long sweeping curves at speed (charged: faster, tighter), swerving from walls and drops, back
-        /// towards home when it strays, away from the rancher when close (not when charged), short pauses now and then.
+        /// towards home when it strays, short pauses now and then. Chased (rancher close or the vacpack on it): flees
+        /// faster than the rancher runs, jinking across the suction cone; walls with a reachable top get climbed.
         /// </summary>
         void FixedUpdate()
         {
-            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic) return;
-            if (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())) return;
+            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())))
+            {
+                SetNoForces(false);
+                _climbUntil = 0f;
+                return;
+            }
+            Sense();
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
-            if (!U.Grounded(transform, s)) return;
             float now = Time.time, dt = Time.fixedDeltaTime;
             var pos = transform.position;
-            if (!_homeSet || (pos - _home).sqrMagnitude > 40f * 40f) { _home = pos; _homeSet = true; }   // carried somewhere new
             bool charged = Charged;
+            bool aimed = InVac(pos + Vector3.up * (0.5f * s));
+            Stamina(now, dt, aimed, charged);
+            bool tired = now < _tiredUntil;
+            if (now < _climbUntil) { Climb(pos, s, charged); return; }
+            if (!U.Grounded(transform, s)) return;
+            if (tired && aimed) return;   // worn out: the vacuum gets it
+            if (!_homeSet || (pos - _home).sqrMagnitude > 60f * 60f) { _home = pos; _homeSet = true; }   // carried somewhere new
             if (now > _nextTurn) { _nextTurn = now + U.Rand(0.7f, 1.8f); _turnRate = U.Rand(-95f, 95f) * (charged ? 1.6f : 1f); }
+            var pl = U.Player;
+            var away = Vector3.zero;
+            float plDist = float.MaxValue;
+            if (pl != null) { away = pos - pl.transform.position; away.y = 0f; plDist = away.magnitude; }
+            if (!tired && pl != null && (aimed || plDist < FleeRadius * (charged ? 0.6f : 1f))) _fleeUntil = now + 1.5f;
+            bool fleeing = !tired && now < _fleeUntil;
             float? target = null;
-            if (now < _goalUntil) target = YawOf(_goal - pos);
+            float speed;
+            if (fleeing)
+            {
+                _fledAt = now;
+                var run = plDist > 0.01f ? away / plDist : transform.forward;
+                if (aimed)
+                {
+                    // jink across the suction cone, switching sides now and then
+                    if (now > _nextJink) { _nextJink = now + U.Rand(0.35f, 0.8f); if (U.Rng.NextDouble() < 0.55) _jinkSide = -_jinkSide; }
+                    var side = Vector3.Cross(Vector3.up, _vacFwd); side.y = 0f;
+                    if (side.sqrMagnitude > 1e-4f) run = (side.normalized * (1.4f * _jinkSide) + run).normalized;
+                }
+                target = YawOf(run);
+                speed = Mathf.Min(Mathf.Max(FleeSpeed, _plSpeed * 1.25f + 2.5f) * (charged ? 1.2f : 1f), MaxSpeed * (charged ? 1.15f : 1f));
+            }
             else
             {
-                var toHome = _home - pos; toHome.y = 0f;
-                if (toHome.magnitude > TetherRadius) target = YawOf(toHome);
-                var pl = U.Player;
-                if (pl != null && !charged)
+                if (now < _goalUntil) target = YawOf(_goal - pos);
+                else
                 {
-                    var away = pos - pl.transform.position; away.y = 0f;
-                    if (away.magnitude < 3.5f) target = YawOf(away);   // skittish
+                    var toHome = _home - pos; toHome.y = 0f;
+                    if (toHome.magnitude > TetherRadius)
+                    {
+                        if (now - _fledAt < 3f) _home = pos;   // ran off somewhere new: roam there
+                        else target = YawOf(toHome);
+                    }
                 }
+                speed = now < _pauseUntil ? 0f : (charged ? ChargedSpeed : RunSpeed) * (now < _boostUntil ? 1.5f : 1f);
+                if (tired) speed = RunSpeed * 0.3f;
             }
-            float maxTurn = (charged ? 320f : 210f) * dt;
+            float maxTurn = (fleeing ? 400f : charged ? 320f : 210f) * dt;
             if (target.HasValue) _yaw = Mathf.MoveTowardsAngle(_yaw, target.Value, maxTurn);
             else _yaw += _turnRate * dt;
-            float speed = now < _pauseUntil ? 0f : (charged ? ChargedSpeed : RunSpeed) * (now < _boostUntil ? 1.5f : 1f);
             var dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
-            if (speed > 0f && Blocked(pos, dir, s, speed))
+            if (speed > 0f)
             {
-                bool l = Blocked(pos, Quaternion.Euler(0f, -60f, 0f) * dir, s, speed), r = Blocked(pos, Quaternion.Euler(0f, 60f, 0f) * dir, s, speed);
-                float side = (!l && r) ? -1f : (l && !r) ? 1f : (_turnRate >= 0f ? 1f : -1f);
-                _yaw += side * (l && r ? 540f : 400f) * dt;
-                if (l && r) speed *= 0.35f;   // dead end: brake and swing round
-                _turnRate = side * Mathf.Abs(_turnRate);
-                dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                // drops: chased it jumps down from anything that isn't too high, roaming only when it is up above its home
+                float maxDrop = fleeing ? 10f : pos.y > _home.y + 1.5f ? 6f : 2.1f;
+                var a = Look(pos, dir, s, speed, maxDrop, out var wall);
+                if (a == Ahead.Wall && !tired && TryClimb(now, pos, dir, s, wall, fleeing || pos.y < _home.y - 1.5f)) return;
+                if (a != Ahead.Clear)
+                {
+                    bool l = Look(pos, Quaternion.Euler(0f, -60f, 0f) * dir, s, speed, maxDrop, out _) != Ahead.Clear;
+                    bool r = Look(pos, Quaternion.Euler(0f, 60f, 0f) * dir, s, speed, maxDrop, out _) != Ahead.Clear;
+                    float side = (!l && r) ? -1f : (l && !r) ? 1f : (_turnRate >= 0f ? 1f : -1f);
+                    _yaw += side * (l && r ? 540f : 400f) * (fleeing ? 1.3f : 1f) * dt;
+                    if (l && r) speed *= 0.35f;   // dead end: brake and swing round
+                    _turnRate = side * Mathf.Abs(_turnRate);
+                    dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                }
             }
             // grip: pull the horizontal velocity towards the heading, keep the vertical one (no hops)
             var v = _rb.linearVelocity;
             var dv = dir * speed - new Vector3(v.x, 0f, v.z);
-            float maxDv = Grip * (charged ? 1.5f : 1f) * dt;
+            float maxDv = (fleeing ? FleeGrip : Grip) * (charged ? 1.5f : 1f) * (tired ? 0.4f : 1f) * dt;
             if (dv.magnitude > maxDv) dv = dv.normalized * maxDv;
             _rb.AddForce(dv, ForceMode.VelocityChange);
+            if (fleeing) _rb.AddForce(Vector3.down * 12f, ForceMode.Acceleration);   // hugs the ground at speed
             if (speed > 0.5f) _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(dir, Vector3.up), 10f * dt));
             if (now > _nextPause)
             {
                 _nextPause = now + U.Rand(5f, 12f);
-                if (!charged) _pauseUntil = now + U.Rand(0.6f, 1.8f);
+                if (!charged && !fleeing) _pauseUntil = now + U.Rand(0.6f, 1.8f);
             }
+        }
+
+        /// <summary>A wall ahead with a top it can reach (up to ClimbHeight bodies): run up it (roaming: now and then).</summary>
+        bool TryClimb(float now, Vector3 pos, Vector3 dir, float s, RaycastHit wall, bool eager)
+        {
+            if (!eager)
+            {
+                if (now < _nextClimbRoll) return false;
+                _nextClimbRoll = now + U.Rand(1.5f, 3f);
+                if (U.Rng.NextDouble() > 0.45) return false;
+            }
+            if (!Physics.Raycast(pos + Vector3.up * (0.1f * s), Vector3.down, out var gnd, 1.5f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
+            float maxH = ClimbHeight * s, baseY = gnd.point.y;
+            var wallDir = -wall.normal; wallDir.y = 0f;
+            if (wallDir.sqrMagnitude < 0.01f) return false;
+            wallDir.Normalize();
+            // headroom (no overhang above it), then the top of the wall just past its face
+            if (Physics.Raycast(pos, Vector3.up, maxH + 0.8f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
+            var probe = new Vector3(wall.point.x, baseY + maxH + 0.8f * s, wall.point.z) + wallDir * (0.8f * s);
+            if (Physics.CheckSphere(probe, 0.3f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;   // taller than that
+            if (!Physics.Raycast(probe, Vector3.down, out var top, maxH + 0.8f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
+            float h = top.point.y - baseY;
+            if (top.normal.y < 0.6f || h < 0.5f * s || h > maxH) return false;
+            if (Physics.CheckSphere(top.point + Vector3.up * (0.75f * s), 0.4f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;   // no room up there
+            if (Physics.Raycast(top.point + Vector3.up * 0.5f, Vector3.down, 1f, WaterMask, QueryTriggerInteraction.Collide)) return false;
+            _climbTop = top.point;
+            _climbDir = wallDir;
+            _climbUntil = now + h / (ClimbSpeed * Mathf.Sqrt(s)) + 0.8f;
+            _yaw = YawOf(wallDir);
+            if (Cfg.Diagnostics.Value) ClassicSlimesMod.Log.Msg($"Quicksilver {name} climbs {h:0.0} m");
+            return true;
+        }
+
+        /// <summary>Running up the wall (straight up along its face), over the edge at the top.</summary>
+        void Climb(Vector3 pos, float s, bool charged)
+        {
+            if (pos.y >= _climbTop.y + 0.75f * s)
+            {
+                _climbUntil = 0f;
+                var v = _rb.linearVelocity;
+                _rb.linearVelocity = _climbDir * (Mathf.Max(RunSpeed, new Vector2(v.x, v.z).magnitude) * 0.8f) + Vector3.up * 1.5f;
+                return;
+            }
+            _rb.linearVelocity = _climbDir * 1.2f + Vector3.up * (ClimbSpeed * (charged ? 1.4f : 1f) * Mathf.Sqrt(s));
+            _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(_climbDir, Vector3.up), 12f * Time.fixedDeltaTime));
+        }
+
+        /// <summary>Dev: runner state.</summary>
+        public string DevInfo()
+        {
+            float now = Time.time;
+            var v = _rb != null ? _rb.linearVelocity : Vector3.zero;
+            return $"{name} v {new Vector2(v.x, v.z).magnitude:0.0}/{v.y:0.0} stamina {_stamina:0.00} tired {now < _tiredUntil} flee {now < _fleeUntil} climb {now < _climbUntil} " +
+                   $"charged {Charged} grounded {U.Grounded(transform, Mathf.Max(0.3f, transform.lossyScale.x))} rancher {_plSpeed:0.0} m/s vac {_vacOn} in {InVac(transform.position + Vector3.up * 0.5f)} noForces {_noForces} home {Vector3.Distance(_home, transform.position):0}m";
         }
 
         void OnDisable()
         {
             try { if (_chargedLook) SetChargedLook(false); } catch { }
+            SetNoForces(false);
+            _climbUntil = 0f;
         }
 
         public void Overcharge(float seconds)
@@ -1149,7 +1362,7 @@ namespace ClassicSlimes
             if (now > _nextDash)
             {
                 _nextDash = now + U.Rand(2.5f, 6f) * (charged ? 0.45f : 1f);
-                if (!posed && U.Grounded(transform, s)) Dash(charged, center);
+                if (!posed && !Tired && now >= _climbUntil && U.Grounded(transform, s)) Dash(charged, center);
             }
             if (!charged)
             {
@@ -1249,7 +1462,7 @@ namespace ClassicSlimes
             if (_rb == null || _rb.isKinematic) return;
             Vector3 dir;
             var pl = U.Player;
-            if (!charged && pl != null && U.DistToPlayer(center) < 4f && U.Rng.NextDouble() < 0.5)
+            if (!charged && pl != null && U.DistToPlayer(center) < 9f && U.Rng.NextDouble() < 0.7)
                 dir = Quaternion.Euler(0f, U.Rand(-35f, 35f), 0f) * (transform.position - pl.transform.position);   // skittish: darts away
             else
                 dir = Quaternion.Euler(0f, U.Rand(-50f, 50f), 0f) * transform.forward;
@@ -1320,7 +1533,7 @@ namespace ClassicSlimes
         // caught + thrown -> panic
         float _fleeUntil, _nextFleeHop, _nextFleeBlink, _fleePendingAt = -1f;
         bool _wasHeld, _wasLaunched;
-        public static float FleeTime = 8f, FleeHop = 5.5f, FleeLift = 3.6f;
+        public static float FleeTime = 10f, FleeHop = 11f, FleeLift = 2.3f;
         public bool Fleeing => Time.time < _fleeUntil;
 
         ParticleSystem _pixels, _trail, _burst;
@@ -1623,7 +1836,7 @@ namespace ClassicSlimes
             _fleePendingAt = -1f;
             _fleeUntil = now + FleeTime;
             _nextFleeHop = now + 0.05f;
-            _nextFleeBlink = now + U.Rand(1.5f, 3f);
+            _nextFleeBlink = now + U.Rand(0.8f, 1.6f);
             _rubberAt = -1f;
             _nextDisguise = Mathf.Max(_nextDisguise, _fleeUntil + U.Rand(4f, 10f));
             _nextBlink = Mathf.Max(_nextBlink, _fleeUntil + U.Rand(4f, 10f));
@@ -1643,23 +1856,23 @@ namespace ClassicSlimes
             var away = pl != null ? pos - pl.transform.position : transform.forward;
             away.y = 0f;
             float dist = away.magnitude;
-            if (pl != null && dist > 25f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }   // got away
+            if (pl != null && dist > 32f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }   // got away
             away = dist > 0.01f ? away / dist : Vector3.forward;
             if (!U.Grounded(transform, s)) return;
             if (now > _nextFleeBlink)
             {
-                _nextFleeBlink = now + U.Rand(2.5f, 4.5f);
+                _nextFleeBlink = now + U.Rand(1.2f, 2.2f);
                 var lift = Vector3.up * (0.5f * s);
-                if (U.GroundPointToward(pos, away, 3f * s, 6f * s, 45f, out var to) && !Physics.Linecast(pos + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore))
+                if (U.GroundPointToward(pos, away, 4.5f * s, 8f * s, 40f, out var to) && !Physics.Linecast(pos + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore))
                 {
                     Jump(to, true);
                     return;
                 }
             }
             if (now < _nextFleeHop) return;
-            _nextFleeHop = now + U.Rand(0.35f, 0.6f);
+            _nextFleeHop = now + U.Rand(0.1f, 0.2f);
             var dir = Quaternion.Euler(0f, U.Rand(-35f, 35f), 0f) * away;
-            if (Physics.Raycast(pos + Vector3.up * (0.4f * s), dir, 1.6f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(pos + Vector3.up * (0.4f * s), dir, 2.6f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
                 dir = Quaternion.Euler(0f, U.Rng.NextDouble() < 0.5 ? -80f : 80f, 0f) * dir;   // wall ahead: veer off
             _rb.linearVelocity = dir * FleeHop + Vector3.up * FleeLift;
             _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));

@@ -20,10 +20,10 @@ namespace ClassicSlimes
         public static MelonPreferences_Entry<bool> GlitchDisguise;
         public static MelonPreferences_Entry<int> GlitchDebugReward;
         public static MelonPreferences_Entry<int> QuicksilverShockDamage;
-        public static MelonPreferences_Entry<bool> EnableFoods, WildFoods, RadHud, GlitchSR1Face;
+        public static MelonPreferences_Entry<bool> EnableFoods, WildFoods, RadHud, GlitchSR1Face, PhaseLemonTrees;
         public static MelonPreferences_Entry<float> WildFoodShare, RadRecoveryPerSecond;
         public static MelonPreferences_Entry<int> RadDomeStyle;
-        public static MelonPreferences_Entry<bool> RadHaze, GlitchFlees, QuicksilverRuns, MosaicJelly, QuantumJelly;
+        public static MelonPreferences_Entry<bool> RadHaze, GlitchFlees, QuicksilverRuns, MosaicJelly, QuantumJelly, SpawnHomes, MarketBoard;
 
         public static void Init()
         {
@@ -43,11 +43,13 @@ namespace ClassicSlimes
             SpawnGlitch = Cat.CreateEntry("SpawnChanceGlitch", 0.05f, "Share of wild spawns in Labyrinth Hub / Waterworks");
             SpawnQuicksilver = Cat.CreateEntry("SpawnChanceQuicksilver", 0.08f, "Share of wild spawns in Waterworks / Labyrinth Hub");
 
+            SpawnHomes = Cat.CreateEntry("SpawnHomes", true, "SR1-like fixed spots: in each zone about 30 % of the wild slime spawners are a classic slime's home and spawn it often (4x the share above, 25-80 %), the others never (off: the share above at every spawner)");
+
             RadPerSecond = Cat.CreateEntry("RadExposurePerSecond", 5f, "Radiation absorbed per second inside a rad aura (SR1 value: 5)");
             RadDamagePerTick = Cat.CreateEntry("RadDamage", 4, "Damage dealt each time accumulated radiation overflows");
             RadAuraDamagesPlayer = Cat.CreateEntry("RadAuraDamagesPlayer", true, "Rad aura hurts the player");
             QuantumTeleports = Cat.CreateEntry("QuantumTeleports", true, "Quantum slimes create ghosts and teleport");
-            QuantumPhaseWalls = Cat.CreateEntry("QuantumPhaseWalls", true, "Quantum slimes that are not hungry phase through corral walls");
+            QuantumPhaseWalls = Cat.CreateEntry("QuantumPhaseWalls", true, "Hungry quantum slimes phase through corral walls (fed again they are solid again)");
             QuantumHologram = Cat.CreateEntry("QuantumHologram", true, "Quantum slimes now and then flicker like a hologram (horizontal scanlines)");
             GlitchTrail = Cat.CreateEntry("GlitchTrail", true, "Glitch slimes leave a trail of pixels behind them");
             MosaicGlints = Cat.CreateEntry("MosaicGlints", true, "Mosaic slimes create glints");
@@ -58,7 +60,9 @@ namespace ClassicSlimes
 
             EnableFoods = Cat.CreateEntry("EnableSR1Foods", true, "Enable the SR1 foods Oca Oca, Silver Parsnip and Phase Lemon (favourites of the classic slimes; plantable in gardens)");
             WildFoods = Cat.CreateEntry("WildSR1Foods", true, "SR1 foods also grow on wild veggie patches / fruit trees");
-            WildFoodShare = Cat.CreateEntry("WildSR1FoodShare", 0.15f, "Share of the wild patch/tree harvest that is an SR1 food (0..0.9)");
+            MarketBoard = Cat.CreateEntry("BiggerMarketBoard", true, "Make room on the plort market board for the classic plorts (uses the empty 10th column and fills the short columns; vanilla shows only 25 plorts)");
+            PhaseLemonTrees = Cat.CreateEntry("PhaseLemonTrees", true, "SR1 phase lemon trees: they grow see-through phasing lemons that can't be vacuumed; shoot another fruit into the tree to knock a solid phase lemon loose");
+            WildFoodShare = Cat.CreateEntry("WildSR1FoodPatchShare", 0.25f, "Share of the wild veggie patches / fruit trees in the SR1 food zones that grow an SR1 food instead (the whole patch / tree, always the same spots)");
             RadHud = Cat.CreateEntry("RadiationMeter", true, "Show the radiation meter (SR1 style) above the health bar while irradiated");
             RadRecoveryPerSecond = Cat.CreateEntry("RadRecoveryPerSecond", 3f, "Radiation that wears off per second once out of a rad aura");
             RadDomeStyle = Cat.CreateEntry("RadDomeStyle", 0, "Rad aura look: 0 refracting sphere with a soft green edge (SR1), 1 bubble (SR2 icon style), 2 shadow aura, 3 hyper aura, 4 solar shield, 5 dream bubble, 6 fresnel, 7 bubble (particle shader)");

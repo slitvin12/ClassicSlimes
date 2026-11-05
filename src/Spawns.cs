@@ -49,6 +49,12 @@ namespace ClassicSlimes
             {
                 if (!scenes.Any(z => scene.Contains(z))) continue;
                 float p = Mathf.Clamp(spec.Chance.Value, 0f, 0.9f);
+                if (Cfg.SpawnHomes.Value)
+                {
+                    // SR1-like fixed spots: only the slime's homes (a stable ~30 % of the zone's spawners) spawn it, but often
+                    if (!IsHome(spawner, scene, spec)) continue;
+                    p = Mathf.Clamp(p * 4f, 0.25f, 0.8f);
+                }
                 foreach (var c in constraints)
                 {
                     if (c == null || c.Feral || c.Slimeset == null || c.Slimeset.Members == null) continue;
@@ -76,6 +82,44 @@ namespace ClassicSlimes
             return added;
         }
 
+        public const float HomeFraction = 0.3f;
+        static readonly List<(DirectedActorSpawner sp, string scene, string names)> _homes = new();
+        static readonly HashSet<IntPtr> _homeSet = new();
+
+        /// <summary>Stable hash in [0,1) (string.GetHashCode is randomised per process).</summary>
+        internal static float Hash01(string s)
+        {
+            uint h = 2166136261;
+            foreach (char ch in s) { h ^= ch; h *= 16777619; }
+            h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
+            return (h & 0xFFFFFF) / (float)0x1000000;
+        }
+
+        /// <summary>Spot key of a scene object (1 m grid).</summary>
+        internal static string PosKey(Vector3 p) => $"{Mathf.RoundToInt(p.x)},{Mathf.RoundToInt(p.y)},{Mathf.RoundToInt(p.z)}";
+
+        static bool IsHome(DirectedActorSpawner sp, string scene, SlimeSpec spec)
+            => Hash01(spec.Name + "|" + scene + "|" + PosKey(sp.transform.position)) < HomeFraction;
+
+        /// <summary>homes: loaded home spawners of the classic slimes, nearest first.</summary>
+        public static string HomesInfo()
+        {
+            var cam = Camera.main;
+            var p = cam != null ? cam.transform.position : Vector3.zero;
+            var live = new List<(float d, string s)>();
+            var per = new Dictionary<string, int>();
+            foreach (var h in _homes)
+            {
+                if (h.sp == null) continue;
+                var q = h.sp.transform.position;
+                live.Add(((q - p).magnitude, $"{h.names} {h.scene}/{h.sp.name} ({q.x:0},{q.y:0},{q.z:0})"));
+                foreach (var n in h.names.Split('+')) { per.TryGetValue(h.scene + ":" + n, out int c); per[h.scene + ":" + n] = c + 1; }
+            }
+            live.Sort((a, b) => a.d.CompareTo(b.d));
+            return $"homes on={Cfg.SpawnHomes.Value} loaded={live.Count} [{string.Join(", ", per.Select(kv => kv.Key + " x" + kv.Value))}]"
+                + string.Join("", live.Take(15).Select(x => $" | {x.d:0} m {x.s}"));
+        }
+
         static bool IsWildSlimeSpawner(DirectedActorSpawner spawner) =>
             spawner.TryCast<DirectedSlimeSpawner>() != null && spawner.TryCast<DirectedAnimalSpawner>() == null;
 
@@ -85,6 +129,11 @@ namespace ClassicSlimes
             string scene = spawner.gameObject.scene.name?.ToLowerInvariant() ?? "";
             if (!_entries.Any(e => e.scenes.Any(z => scene.Contains(z)))) return;
             _touched.Add(spawner.Pointer);
+            if (Cfg.SpawnHomes.Value && _homeSet.Add(spawner.Pointer))
+            {
+                var names = _entries.Where(e => e.scenes.Any(z => scene.Contains(z)) && IsHome(spawner, scene, e.spec)).Select(e => e.spec.Name).ToList();
+                if (names.Count > 0) _homes.Add((spawner, scene, string.Join("+", names)));
+            }
             int k = Apply(spawner, scene);
             if (k <= 0) return;
             AddedPerScene.TryGetValue(scene, out int was);

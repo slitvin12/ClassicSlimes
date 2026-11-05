@@ -253,8 +253,13 @@ namespace ClassicSlimes
             {
                 var art = Res.Bytes("pediaSlime" + s.Name + ".png") != null ? Res.Sprite("pediaSlime" + s.Name) : icon;
                 PediaArt.Register(def, art);
+                if (s.HasPlort && Res.Bytes("pediaPlort" + s.Name + ".png") != null) PediaArt.RegisterPlort(def, Res.Sprite("pediaPlort" + s.Name));
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"Pedia art {s.Name}: {e.Message}"); }
+
+            // no food group: SR2's diet highlight would say "Fruit" without an icon
+            if (s.Name == "Quicksilver") PediaArt.RegisterDiet(def, Library.CreateLocalizedString("m.diet.quicksilver_slime", "Pedia"), () => Res.Sprite("pediaDietEnergy"));
+            else if (s.Name == "Glitch") PediaArt.RegisterDiet(def, Library.CreateLocalizedString("m.diet.glitch_slime", "Pedia"), () => PediaArt.GameSprite("unavailableIcon"));
 
             try
             {

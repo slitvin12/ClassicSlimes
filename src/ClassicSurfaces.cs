@@ -171,6 +171,8 @@ namespace ClassicSlimes
                 bodies[src.Pointer] = m;
             }
             var structures = new List<SlimeAppearanceStructure>();
+            // ringtail ears and tail share the body: glass too, but with the ringtail rings instead of the body's tiles
+            var ringed = new Dictionary<IntPtr, Material>();
             int parts = 0;
             foreach (var s in source)
             {
@@ -185,6 +187,16 @@ namespace ClassicSlimes
                     var mk = mats[k];
                     if (mk == null) { list.Add(null); continue; }
                     if (mk.name.Contains("MosaicCoat")) { changed = true; continue; }
+                    if (s.Element.Type != EType.BODY && bodies.ContainsKey(mk.Pointer) && RingMarked(mk))
+                    {
+                        if (!ringed.TryGetValue(mk.Pointer, out var rings))
+                        {
+                            rings = new Material(mk) { name = mk.name + "_rings_MosaicPart", hideFlags = HideFlags.DontUnloadUnusedAsset };
+                            MosaicSurface(rings, pal.Top, pal.Middle, pal.Bottom, tint, false);
+                            ringed[mk.Pointer] = rings;
+                        }
+                        list.Add(rings); changed = true; parts++; continue;
+                    }
                     if (bodies.TryGetValue(mk.Pointer, out var body)) { list.Add(body); changed = true; if (s.Element.Type != EType.BODY) parts++; continue; }
                     if (k == 0 && !bare && s.Element.Type != EType.BODY && !mk.name.Contains("_Mosaic"))
                     {
@@ -200,6 +212,42 @@ namespace ClassicSlimes
             }
             app._structures = Gc.Array(structures);
             if (parts > 0) ClassicSlimesMod.Log.Msg($"[mosaic] {app.name}: {bodies.Count} body + {parts} parts in glass");
+        }
+
+        // SR2 ringtail markings (mask_ringtail_multicolor: R = the darker fur, B = the dark tail rings, G unused), ringtail
+        // slimeRingtailBase colours: base Top / Middle / Bottom and the R / B channel colours at the same heights.
+        static readonly Color[] RtBase = { new(0.840f, 0.741f, 0.582f), new(0.659f, 0.447f, 0.290f), new(0.406f, 0.284f, 0.193f) };
+        static readonly Color[] RtRed = { new(0.462f, 0.400f, 0.355f), new(0.396f, 0.291f, 0.252f), new(0.264f, 0.191f, 0.163f) };
+        static readonly Color[] RtBlue = { new(0.302f, 0.263f, 0.249f), new(0.217f, 0.158f, 0.134f), new(0.123f, 0.090f, 0.076f) };
+
+        static float Lum(Color c) => c.r * 0.3f + c.g * 0.59f + c.b * 0.11f;
+        static Color Shade(Color c, float k) => new(Mathf.Clamp01(c.r * k), Mathf.Clamp01(c.g * k), Mathf.Clamp01(c.b * k), 1f);
+
+        /// <summary>A body material with the SR2 ringtail markings (its multi-colour mask is one of the ringtail masks).</summary>
+        internal static bool RingMarked(Material m)
+        {
+            if (m == null || !m.IsKeywordEnabled("_BODYCOLORING_MULTI") || !m.HasProperty("_ColorMask")) return false;
+            var t = m.GetTexture("_ColorMask");
+            return t != null && t.name.IndexOf("ringtail", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>
+        /// The ringtail markings in a largo palette: the darker fur and the dark rings keep their brightness relative to
+        /// the ringtail's base colour at every height (Rad: dark green rings on green, Quantum: brown-gold rings on gold).
+        /// </summary>
+        internal static void RingtailMarkings(Material m, Color top, Color mid, Color bottom)
+        {
+            if (m == null) return;
+            Color[] pal = { top, mid, bottom };
+            string[] lv = { "Top", "Middle", "Bottom" };
+            for (int i = 0; i < 3; i++)
+            {
+                float r = Lum(RtRed[i]) / Lum(RtBase[i]), b = Lum(RtBlue[i]) / Lum(RtBase[i]);
+                m.Col("_Red" + lv[i] + "Color", Shade(pal[i], Mathf.Pow(r, 0.8f)));
+                m.Col("_Green" + lv[i] + "Color", pal[i]);
+                m.Col("_Blue" + lv[i] + "Color", Shade(pal[i], b));
+            }
+            m.Palette(top, mid, bottom);
         }
 
         /// <summary>How much lighter the SR1 spiral is than the quantum largo body (top level, towards white).</summary>

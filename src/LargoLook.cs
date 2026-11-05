@@ -28,7 +28,7 @@ namespace ClassicSlimes
             try
             {
                 RegisterStyles();
-                ClassicSlimesMod.Log.Msg("Largos: CottonForge styles + SR1 Rad / Quantum / Mosaic largo looks registered (glass parts v3)");
+                ClassicSlimesMod.Log.Msg("Largos: CottonForge styles + SR1 Rad / Quantum / Mosaic largo looks registered (glass parts v3, ringtail rings)");
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("Largo styles failed: " + e.Message); }
         }
@@ -76,6 +76,9 @@ namespace ClassicSlimes
                 top = new Color(0.2704f, 0.8971f, 0.4822f); mid = new Color(0f, 0.5f, 0.0655f); bottom = new Color(0.1116f, 0.2279f, 0f);
             }
             c.BodyMaterial.Palette(top, mid, bottom);
+            // ringtail: its fur markings and tail rings (ears and tail share the body material) in shades of the palette
+            bool rings = Visuals.RingMarked(c.BodyMaterial);
+            if (rings) Visuals.RingtailMarkings(c.BodyMaterial, top, mid, bottom);
             if (c.Appearance != null)
             {
                 var p = c.Appearance._colorPalette;
@@ -84,7 +87,7 @@ namespace ClassicSlimes
                 c.Appearance._splatColor = mid; c.Appearance.SetSplatColor();
             }
             Visuals.Mats[c.Largo.name] = Mat.Track(c.BodyMaterial);
-            ClassicSlimesMod.Log.Msg("[classic look] " + c.Largo.name + ": SR1 palette, original parent markings, no phosphor blob");
+            ClassicSlimesMod.Log.Msg("[classic look] " + c.Largo.name + ": SR1 palette, original parent markings" + (rings ? " (ringtail rings)" : "") + ", no phosphor blob");
         }
 
         // ------------------------------------------------------------ SR1 largo palettes (Steam guide 2376297882)
@@ -263,8 +266,45 @@ namespace ClassicSlimes
             Color top = GoldTop, mid = GoldMid, bottom = GoldBottom;
             if (c.Has("Pink")) { top = PinkTop; mid = PinkMid; bottom = PinkBottom; }
             else if (c.Has("Rad")) { top = LimeTop; mid = LimeMid; bottom = LimeBottom; }
+            // the swirl replaces the body's colour mask: ringtail ears and tail (on the body material) keep the rings
+            var rings = Visuals.RingMarked(c.BodyMaterial)
+                ? new Material(c.BodyMaterial) { name = c.BodyMaterial.name + "_rings", hideFlags = HideFlags.DontUnloadUnusedAsset }
+                : null;
             Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), top, mid, bottom);
             Paint(c, top, mid, bottom, 0.12f);
+            if (rings != null) KeepRings(c, rings, top, mid, bottom);
+        }
+
+        /// <summary>Parts on the body material (ringtail ears, tail) get the ringtail-marked copy, in the largo palette.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void KeepRings(CottonLibrary.Forge.LargoBuild c, Material rings, Color top, Color mid, Color bottom)
+        {
+            var body = c.BodyMaterial;
+            Visuals.RingtailMarkings(rings, top, mid, bottom);
+            EffectColors(rings, top, mid, bottom);
+            rings.Flt("_GlossPower", 0.72f);
+            Mat.Track(rings);
+            int n = 0;
+            for (int i = 0; i < c.Structures.Count; i++)
+            {
+                var s = c.Structures[i];
+                var mats = s?.DefaultMaterials;
+                if (s?.Element == null || s.Element.Type == EType.BODY || mats == null) continue;
+                bool hit = false;
+                var list = new List<Material>();
+                for (int k = 0; k < mats.Length; k++)
+                {
+                    var m = mats[k];
+                    if (m != null && body != null && m.Pointer == body.Pointer) { list.Add(rings); hit = true; }
+                    else list.Add(m);
+                }
+                if (!hit) continue;
+                var copy = new SlimeAppearanceStructure(s);
+                copy.DefaultMaterials = Gc.Array(list);
+                c.Structures[i] = copy;
+                n++;
+            }
+            ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: ringtail rings kept on {n} parts");
         }
 
         // Only JIT-compiled when the fork is present (fork-only types).
@@ -280,6 +320,8 @@ namespace ClassicSlimes
             CottonLibrary.Forge.LargoRecipe.For("Rad", "Tabby").Body("Tabby").ColorsOf("Rad").OnBuild(ClassicRad);
             CottonLibrary.Forge.LargoRecipe.For("Rad", "Rock").Body("Rock").ColorsOf("Rad").OnBuild(ClassicRad);
             CottonLibrary.Forge.LargoRecipe.For("Rad", "Boom").Body("Boom").ColorsOf("Boom").OnBuild(ClassicRad);
+            // Ringtail: its own body with the fur markings and the ringed tail, in rad greens (dark green rings)
+            CottonLibrary.Forge.LargoRecipe.For("Rad", "Ringtail").Body("Ringtail").ColorsOf("Rad").OnBuild(ClassicRad);
             // SR1: white glowing phosphor body, amber honey body with its comb.
             CottonLibrary.Forge.LargoRecipe.For("Rad", "Phosphor").Body("Phosphor").ColorsOf("Phosphor");
             CottonLibrary.Forge.LargoRecipe.For("Rad", "Honey").Body("Honey").ColorsOf("Honey");

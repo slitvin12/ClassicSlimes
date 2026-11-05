@@ -111,6 +111,7 @@ namespace ClassicSlimes
                 case "mats": ClassicSlimesMod.Log.Msg("[cmd] mats: " + string.Join(", ", Visuals.Mats.Keys)); break;
                 case "pose": Pose(a.Length > 1 ? a[1] : "Rad", F(a, 2, 2.6f), F(a, 3, 10f), F(a, 4, -0.45f), F(a, 5, 0f)); break;
                 case "vac": Vac(a.Length < 2 || a[1] != "on"); break;
+                case "face": Face(a); break;   // face yaw [pitch] | face x y z (look at a point)
                 case "domes": Domes(); break;
                 case "dome": Visuals.DomeStyle = (int)F(a, 1, 0f); RadSlime.RestyleAll(); break;
                 case "radx": foreach (var r in RadSlime.All) if (r != null) r.ForceExpand(); break;
@@ -127,6 +128,21 @@ namespace ClassicSlimes
                     foreach (var fs in Foods.All) L($"food {fs.Ident} type={(fs.Type != null)} name={(fs.Type?.localizedName != null ? fs.Type.localizedName.GetLocalizedString() : "-")} veg={Foods.Ready}");
                     foreach (var kv in Foods.Added) L($"  wild {kv.Key} x{kv.Value}");
                     break;
+                case "garden": L(Foods.GardenInfo()); break;   // plantable state of the nearest garden (SR1 foods + carrot / pogo)
+                case "homes": L(Spawns.HomesInfo()); break;   // home spawners of the classic slimes, nearest first
+                case "foodspots": L(Foods.FoodSpots()); break;   // wild SR1 food patches / trees, nearest first
+                case "market": L(Market.Info()); break;   // classic plort prices + market board slots
+                case "marketui": L(Market.DumpUI()); break;
+                case "marketlock": L(Market.Locks()); break;
+                case "sellplort": L(Market.Sell(a.Length > 1 ? a[1] : "RadPlort", (int)F(a, 2, 1f))); break;   // sellplort [ident] [n]: drop plorts into the nearest market intake   // which board entries are unlocked (pedia ident map)   // market board hierarchy -> marketui.txt
+                case "pediashot": PediaShot.Start(a[1], F(a, 2, 25f), F(a, 3, 12f), F(a, 4, 0.6f), a.Length > 5 ? a[5] : null); break;   // pediashot ident [yaw] [tilt] [fill] [name]
+                case "pedialist": L(PediaShot.List()); break;
+                case "pediaclose":   // close the slimepedia (after `pedia`)
+                    { int n = 0; foreach (var r in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.UI.Pedia.PediaRoot>()) if (r != null && r.gameObject.activeInHierarchy) { r.StartCoroutine(r.ClosePedia()); n++; } L("pediaclose: " + n); }
+                    break;
+                case "pediaimgs": L(PediaArt.Dump()); break;   // visible images of the open slimepedia -> pediaimgs.txt
+                case "lemontree": L(Foods.LemonTree(a.Length > 1 ? a[1] : "")); break;   // lemontree [ripen|hit]: nearest lemon tree, phasing lemons
+                case "plant": L(Foods.DevPlant(a.Length > 1 ? a[1] : "LemonFruit")); break;   // plant [ident]: plant into the nearest garden
                 case "matinfo": MatInfo(a[1]); break;
                 case "facedump":
                     {
@@ -246,6 +262,14 @@ namespace ClassicSlimes
                         if (q != null) q.GetComponent<QuicksilverSlime>().DevDash(); else L("no quicksilver slime");
                         break;
                     }
+                case "qsinfo":   // runner state of the nearest quicksilver
+                    {
+                        var cam = Camera.main; var q = cam != null ? Nearest<QuicksilverSlime>(cam.transform.position) : null;
+                        L(q != null ? "qsinfo " + q.GetComponent<QuicksilverSlime>().DevInfo() : "no quicksilver slime");
+                        break;
+                    }
+                case "qsaim":   // qsaim [seconds]: pretend the vacpack sucks along the view (quicksilvers jink and tire out)
+                    QuicksilverSlime.DevAimUntil = Time.time + F(a, 1, 5f); break;
                 case "gblink":   // nearest glitch blink-teleports now
                     {
                         var cam = Camera.main; var g = cam != null ? Nearest<GlitchSlime>(cam.transform.position) : null;
@@ -548,6 +572,13 @@ namespace ClassicSlimes
             var e = pd.GetEntry(spec.Def);
             if (e == null) { L("no pedia entry for " + name); return; }
             pd.Unlock(e, false);
+            // already open: switch the page directly (ShowPedia on an open pedia falls back to the first slime)
+            var cats = new List<string>();
+            foreach (var c in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Pedia.PediaCategory>())
+                try { if (c != null && c.Contains(e)) cats.Add($"{c.name}:{c.IndexOf(e)}/{c.Count}"); } catch { }
+            L($"pedia {name}: unlocked={pd.IsUnlocked(e)} available={e.IsAvailable} categories={string.Join(",", cats)}");
+            foreach (var scr in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.UI.Pedia.PediaSlimeAndResourceScreen>())
+                if (scr != null && scr.gameObject.activeInHierarchy) { scr.ViewEntry(e); L($"pedia {name}: entry={e.name} (view)"); return; }
             pd.ShowPedia(e, Il2CppMonomiPark.SlimeRancher.Analytics.Event.PediaOpenedAnalyticsEvent.Opener.DEBUG_MENU, null);
             L($"pedia {name}: entry={e.name} art={(PediaArt.For(e) != null ? "ours" : "none")}");
         }
@@ -656,6 +687,22 @@ namespace ClassicSlimes
         }
 
         static readonly List<Renderer> _hiddenVac = new();
+        static void Face(string[] a)
+        {
+            var cam = Camera.main;
+            float yaw = F(a, 1, 0f), pitch = F(a, 2, 0f);
+            if (a.Length > 3 && cam != null)
+            {
+                var d = new Vector3(F(a, 1, 0f), F(a, 2, 0f), F(a, 3, 0f)) - cam.transform.position;
+                yaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+                pitch = -Mathf.Atan2(d.y, new Vector2(d.x, d.z).magnitude) * Mathf.Rad2Deg;
+            }
+            int n = 0;
+            foreach (var cc in UnityEngine.Object.FindObjectsOfType<SRCharacterController>()) { cc.Rotation = Quaternion.Euler(0f, yaw, 0f); n++; }
+            foreach (var fc in UnityEngine.Object.FindObjectsOfType<Il2CppMonomiPark.KFC.FirstPerson.FirstPersonCameraController>()) { fc.SetRotation(Quaternion.Euler(pitch, yaw, 0f)); n++; }
+            L($"face yaw {yaw:0.0} pitch {pitch:0.0} ({n} controllers)");
+        }
+
         static void Vac(bool hide)
         {
             if (!hide) { foreach (var r in _hiddenVac) if (r != null) r.enabled = true; _hiddenVac.Clear(); return; }
