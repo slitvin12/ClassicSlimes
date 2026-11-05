@@ -8,7 +8,8 @@ os.makedirs(OUT, exist_ok=True)
 for f in os.listdir(os.path.join(EX, 'icons')):
     if f.endswith('.png'):
         shutil.copy2(os.path.join(EX, 'icons', f), os.path.join(OUT, f))
-for f in ['mosaic_LOD0', 'slime_quicksilver', 'quicksilvercrest', 'sf_sphere_lowpoly', 'slime_default', 'plort']:
+# mosaicGordo_LOD0 (SR1 Mosaic gordo facet shell) comes from tools/sr1gordo.py
+for f in ['mosaic_LOD0', 'slime_quicksilver', 'quicksilvercrest', 'sf_sphere_lowpoly', 'slime_default', 'plort', 'mosaicGordo_LOD0']:
     shutil.copy2(os.path.join(EX, 'mesh', f + '.csm'), os.path.join(OUT, f + '.csm'))
 
 CLIPS = ['radslime_aura_03', 'player_radiation_sickness', 'quantumslime_warp_01', 'quantumslime_warp_05',

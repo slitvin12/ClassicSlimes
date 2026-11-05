@@ -136,6 +136,8 @@ namespace ClassicSlimes
                 if (mats.Length > 2 && fd.mouthHappy != null) mats[2] = fd.mouthHappy;
                 smr.sharedMaterials = mats;
             }
+            // SR1 gordoMosaic: a separate faceted glass shell over a smooth body (GordoFacets)
+            if (s.Name == "Mosaic") GordoFacets.Setup(obj, smr);
             Types[s.Name] = type;
             Log.Msg($"Created {s.Name} gordo: {eat.TargetCount} foods, body {(body != null ? body.name : "-")}, reward {crate}");
         }

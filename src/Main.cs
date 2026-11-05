@@ -5,7 +5,7 @@ using Il2CppInterop.Runtime.Injection;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.3.1", "ClassicSlimes")]
+[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.3.2-dev", "ClassicSlimes")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 [assembly: MelonAdditionalDependencies("CottonLibrary")]
 
@@ -83,6 +83,7 @@ namespace ClassicSlimes
         {
             try { Mat.Tick(); } catch (Exception e) { Log.Warning("Mat.Tick: " + e.Message); }
             RadHud.Tick();
+            try { GordoFacets.Tick(); } catch { }
             try { PediaArt.Tick(); } catch { }
             if (Diag.Enabled) DevCmd.Tick();
         }

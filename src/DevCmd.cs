@@ -143,6 +143,7 @@ namespace ClassicSlimes
                 case "gordoeat": L(GordoDiag.Eat(F(a, 1, 4f))); break;   // gordoeat [r]: eat state of the nearest gordo + actors near its mouth
                 case "gordoedge": L(GordoDiag.EdgeCmd(a)); break;   // gordoedge [slime] [scan|homes] | gordoedge x y z: distance to the drop around the spot / safer points near it / candidates by the homes -> gordoedge.txt
                 case "gordolanded": L(GordoDiag.Landed(a.Length > 1 ? a[1] : "Mosaic", F(a, 2, 40f), a.Length > 5 ? new Vector3(F(a, 3, 0f), F(a, 4, 0f), F(a, 5, 0f)) : (Vector3?)null)); break;   // gordolanded [slime] [r] [x y z]: the slime, its largos, tarrs around the spot (or x y z): on its level / fell below
+                case "gordofacets": L(GordoFacets.Cmd(a)); break;   // gordofacets [on|off|scale k|fit on|off|offset x y z|flat k|shimmer on|off|body smooth|tiles|top|mid|bottom r g b|drift x]: SR1 facet shell of the Mosaic gordo
                 case "savegame": GameContext.Instance.AutoSaveDirector.SaveGameAndFlush(); L("savegame: saved"); break;
                 case "foodspots": L(Foods.FoodSpots()); break;   // wild SR1 food patches / trees, nearest first
                 case "market": L(Market.Info()); break;   // classic plort prices + market board slots
