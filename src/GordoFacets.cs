@@ -37,11 +37,14 @@ namespace ClassicSlimes
         public static bool Shimmer = false;
 
         public const string ShellName = "mosaicGordo_facets";
-        const string MeshName = "mosaicGordo_LOD0";
+        internal const string MeshName = "mosaicGordo_LOD0";
         static readonly string[] BoneNames = { "bone_skin_top", "bone_skin_bac", "bone_skin_lef", "bone_skin_bot", "bone_skin_fro", "bone_skin_rig" };
         // SR1 slime_gordo mesh bounds, in the same space as the SR1 shell (both children of Vibrating, unscaled)
-        static readonly Vector3 Sr1BodyMin = new(-0.583f, -0.024f, -0.610f), Sr1BodyMax = new(0.583f, 0.980f, 0.552f);
+        internal static readonly Vector3 Sr1BodyMin = new(-0.583f, -0.024f, -0.610f), Sr1BodyMax = new(0.583f, 0.980f, 0.552f);
         static Material _glass, _smooth, _tiles;
+        /// <summary>The Mosaic slime's tile body (Visuals "Mosaic"; the gordo body's own material before the smooth one).</summary>
+        internal static Material Tiles => Visuals.Mats.TryGetValue("Mosaic", out var t) && t != null ? t : _tiles;
+        internal static Material SmoothMat => _smooth;
         static readonly int ReflectionId = Shader.PropertyToID("_Reflection");
         static MelonLogger.Instance Log => ClassicSlimesMod.Log;
 
@@ -188,19 +191,21 @@ namespace ClassicSlimes
             return _glass;
         }
 
-        /// <summary>The Mosaic body without its tiles: SR2 default body colouring (top / middle / bottom), no tile normals.</summary>
-        static Material Smooth()
+        /// <summary>The Mosaic body without its tiles: SR2 default body colouring (top / middle / bottom), no tile normals.
+        /// Also the body of the plain Mosaic slimes under their facets (SlimeFacets).</summary>
+        internal static Material Smooth()
         {
             if (_smooth != null) return _smooth;
-            if (_tiles == null) return null;
-            var m = Object.Instantiate(_tiles);
-            m.name = "ClassicSlimes_MosaicGordoBody";
+            var tiles = Tiles;
+            if (tiles == null) return null;
+            var m = Object.Instantiate(tiles);
+            m.name = "ClassicSlimes_MosaicSmoothBody";
             m.hideFlags = HideFlags.DontUnloadUnusedAsset;
             m.Kw("_BODYCOLORING_MULTI", false); m.Kw("_BODYCOLORING_DEFAULT", true); m.Flt("_BodyColoring", 0f);
             m.Palette(Top, Mid, Bottom);
             m.Kw("_ENABLENORMALS_ON", false); m.Flt("_EnableNormals", 0f);
             ApplyShimmer(m);
-            Visuals.Mats["MosaicGordoBody"] = m;
+            Visuals.Mats["MosaicSmooth"] = m;
             _smooth = Mat.Track(m);
             return _smooth;
         }
@@ -215,7 +220,7 @@ namespace ClassicSlimes
 
         static void ApplyBody(SkinnedMeshRenderer body)
         {
-            var want = Body == "smooth" && On ? Smooth() : _tiles;
+            var want = Body == "smooth" && On ? Smooth() : Tiles;
             if (body == null || want == null) return;
             var mats = body.sharedMaterials;
             if (mats.Length == 0 || mats[0] == want) return;

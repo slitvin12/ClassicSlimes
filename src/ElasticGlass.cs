@@ -57,16 +57,19 @@ namespace ClassicSlimes
                 // Angler fins, Flutter wings) get a GPU coat instead: the original mesh (skinned by the same bones), no warp.
                 bool gpu = !src.isReadable;
                 if (gpu && Unreadable.Add(src.name)) ClassicSlimesMod.Log.Msg($"Elastic mosaic glass: mesh {src.name} ({m.name}) is not readable, rigid GPU coat");
+                // the plain Mosaic slime: SR1's facet shell over the smooth body (SlimeFacets); largos keep the tile coat
+                bool facet = false;
+                if (!gpu && SlimeFacets.IsPlainBody(m)) { m = SlimeFacets.SwapBody(r, m); facet = SlimeFacets.On; }
                 seen.Add(r.Pointer);
                 bool found = false;
                 for (int i = _coats.Count - 1; i >= 0; i--)
                 {
                     var c = _coats[i];
                     if (c.Source == null || c.Source.Pointer != r.Pointer) continue;
-                    if (c.Original == src) { c.Material = m; found = true; }
+                    if (c.Original == src && c.Facet == facet && (!facet || c.Version == SlimeFacets.Version)) { c.Material = m; found = true; }
                     else { c.Dispose(); _coats.RemoveAt(i); }
                 }
-                if (!found) _coats.Add(new Coat(r, skin, src, m, gpu));
+                if (!found) _coats.Add(new Coat(r, skin, src, m, gpu, facet ? _root : null));
             }
             for (int i = _coats.Count - 1; i >= 0; i--)
                 if (_coats[i].Source == null || !seen.Contains(_coats[i].Source.Pointer))
@@ -81,6 +84,23 @@ namespace ClassicSlimes
         }
 
         internal string Info() => $"elastic glass {_coats.Count} LODs / {_vertices} visible verts, index {_index}, warp {_maxWarp:F3}, {_ms:F2} ms (all {TotalMs:F2} ms), show {Show}";
+
+        /// <summary>Rescan every live rig on its next LateUpdate (slimefacets settings changed).</summary>
+        internal static void Resync() { foreach (var r in Live) r._scanAt = 0f; }
+
+        internal static string Census()
+        {
+            int coats = 0, facets = 0, drawn = 0;
+            foreach (var r in Live)
+                foreach (var c in r._coats)
+                {
+                    coats++;
+                    if (c.Shell == null) continue;
+                    facets++;
+                    if (c.Renderer != null && c.Renderer.enabled) drawn++;
+                }
+            return $"{Live.Count} rigs, {coats} coats, {facets} facet shells ({drawn} drawn)";
+        }
 
         static int _irisFrame = -1;
         static readonly int ReflectionId = Shader.PropertyToID("_Reflection");
@@ -151,36 +171,35 @@ namespace ClassicSlimes
                 // transform's scale inside the vertices, and the coat (a child of that transform) gets it twice:
                 // on 2x largos that drew a second, double-size glass bubble around the slime.
                 if (c.Skin != null) c.Skin.BakeMesh(c.Mesh, true);
-                else c.Mesh.vertices = c.Rest;
-                var verts = c.Mesh.vertices;
-                var ns = c.Skin != null ? c.Mesh.normals : c.Normals;
+                else if (c.Shell == null) c.Mesh.vertices = c.Rest;
+                var verts = c.Skin != null || c.Shell == null ? c.Mesh.vertices : c.Rest;
                 var vs = MemoryMarshal.Cast<Vector3, V>(verts.AsSpan());
-                var normals = MemoryMarshal.Cast<Vector3, V>(ns.AsSpan());
                 var m = c.Transform.localToWorldMatrix; var inv = c.Transform.worldToLocalMatrix;
                 var localDelta = Direction(inv, w.Delta);
+                bool warp = !held && !c.Rigid;
+                if (c.Shell != null)
+                {
+                    // plain Mosaic slime: the SR1 facet shell rides on the baked body's triangles, then gets the same warp
+                    var sh = c.Shell;
+                    sh.Place(vs);
+                    var ps = sh.Positions; var pn = sh.Normals; var lift = sh.Lift;
+                    for (int j = 0; j < ps.Length; j++)
+                    {
+                        var p = ps[j];
+                        var displacement = warp ? Displace(p, w, m, inv, localDelta) : V.Zero;
+                        _maxWarp = MathF.Max(_maxWarp, displacement.Length());
+                        ps[j] = p + displacement + pn[j] * (lift[j] * alpha);
+                    }
+                    sh.Upload();
+                    _vertices += ps.Length;
+                    continue;
+                }
+                var ns = c.Skin != null ? c.Mesh.normals : c.Normals;
+                var normals = MemoryMarshal.Cast<Vector3, V>(ns.AsSpan());
                 for (int j = 0; j < vs.Length; j++)
                 {
-                    var p = vs[j]; var displacement = V.Zero;
-                    if (!held && !c.Rigid)
-                    {
-                        if (w.Wobble)
-                        {
-                            var q = Unit(Point(m, p) - w.Center);
-                            float t = Smooth((V.Dot(w.Dir, q) * 0.5f + 0.2f) * 1.428571f);
-                            float vertical = 1f - q.Y * q.Y;
-                            displacement = localDelta * (t * (0.5f * vertical + 0.5f * t) * 0.5f);
-                        }
-                        var pv = p + displacement;
-                        if (w.Squash != 0f && w.NormalSq > 0.000001f && w.Radius > 0.000001f)
-                        {
-                            var world = Point(m, pv); var d = world - w.Surface;
-                            float influence = Smooth(1f - d.Length() / w.Radius);
-                            float bulge = Smooth(MathF.Abs(w.MaskRange) > 0.000001f ? (influence - w.MaskMin) / w.MaskRange : 0f);
-                            var projection = Point(inv, world - w.Normal * (V.Dot(d, w.Normal) / w.NormalSq));
-                            var radial = Unit(p - w.UnitNormal * V.Dot(p, w.UnitNormal));
-                            displacement += ((projection - pv) * influence + radial * (w.Bulge * bulge)) * w.Squash;
-                        }
-                    }
+                    var p = vs[j];
+                    var displacement = warp ? Displace(p, w, m, inv, localDelta) : V.Zero;
                     _maxWarp = MathF.Max(_maxWarp, displacement.Length());
                     float a = j < c.Alpha.Length ? 1f - c.Alpha[j] : 0f;
                     vs[j] = p + displacement + normals[j] * (a * a * alpha + 0.012f);
@@ -190,6 +209,30 @@ namespace ClassicSlimes
                 _vertices += verts.Length;
             }
             _ms = _ms * 0.9 + 0.1 * (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+        }
+
+        /// <summary>SR/AMP/Slime/Body's vertex warp: the wobble along the movement, then the local contact squash (+ bulge).</summary>
+        static V Displace(V p, in Warp w, in Matrix4x4 m, in Matrix4x4 inv, V localDelta)
+        {
+            var displacement = V.Zero;
+            if (w.Wobble)
+            {
+                var q = Unit(Point(m, p) - w.Center);
+                float t = Smooth((V.Dot(w.Dir, q) * 0.5f + 0.2f) * 1.428571f);
+                float vertical = 1f - q.Y * q.Y;
+                displacement = localDelta * (t * (0.5f * vertical + 0.5f * t) * 0.5f);
+            }
+            var pv = p + displacement;
+            if (w.Squash != 0f && w.NormalSq > 0.000001f && w.Radius > 0.000001f)
+            {
+                var world = Point(m, pv); var d = world - w.Surface;
+                float influence = Smooth(1f - d.Length() / w.Radius);
+                float bulge = Smooth(MathF.Abs(w.MaskRange) > 0.000001f ? (influence - w.MaskMin) / w.MaskRange : 0f);
+                var projection = Point(inv, world - w.Normal * (V.Dot(d, w.Normal) / w.NormalSq));
+                var radial = Unit(p - w.UnitNormal * V.Dot(p, w.UnitNormal));
+                displacement += ((projection - pv) * influence + radial * (w.Bulge * bulge)) * w.Squash;
+            }
+            return displacement;
         }
 
         struct Warp
@@ -219,11 +262,16 @@ namespace ClassicSlimes
             internal Material Material;
             /// <summary>The source shader has no slime vertex warp ("_NoWobble" parts): the coat must not warp either.</summary>
             internal readonly bool Rigid;
+            /// <summary>Plain Mosaic slime (SlimeFacets): Shell = the SR1 facet shell, drawn instead of the body copy (null: its fit failed).</summary>
+            internal readonly bool Facet;
+            internal readonly int Version;
+            internal readonly SlimeFacets.Shell Shell;
             readonly GameObject _go;
-            internal Coat(UnityEngine.Renderer source, SkinnedMeshRenderer skin, Mesh original, Material material, bool gpu = false)
+            internal Coat(UnityEngine.Renderer source, SkinnedMeshRenderer skin, Mesh original, Material material, bool gpu = false, Transform facets = null)
             {
                 Source = source; Skin = skin; Original = original; Material = material; Transform = source.transform; Gpu = gpu;
                 Rigid = gpu || material.shader != null && material.shader.name.Contains("NoWobble");
+                Facet = facets != null; Version = SlimeFacets.Version;
                 _go = new GameObject("MosaicElasticGlass") { layer = source.gameObject.layer };
                 _go.transform.SetParent(Transform, false);
                 if (gpu)
@@ -249,16 +297,18 @@ namespace ClassicSlimes
                     var colors = original.colors; Alpha = new float[original.vertexCount];
                     for (int i = 0; i < Alpha.Length; i++) Alpha[i] = colors != null && i < colors.Length ? colors[i].a : 1f;
                     Mesh = Object.Instantiate(original); Mesh.name = "MosaicElasticGlassMesh"; Mesh.MarkDynamic();
-                    _go.AddComponent<MeshFilter>().sharedMesh = Mesh;
+                    if (Facet) Shell = SlimeFacets.Shell.Create(facets, source, skin, original, Rest, Normals, Alpha);
+                    if (Shell != null) _go.name = SlimeFacets.CoatName;
+                    _go.AddComponent<MeshFilter>().sharedMesh = Shell != null ? Shell.Mesh : Mesh;
                     Renderer = _go.AddComponent<MeshRenderer>();
                 }
-                Renderer.sharedMaterial = Visuals.MosaicElasticGlassMaterial();
+                Renderer.sharedMaterial = (Shell != null ? GordoFacets.Glass() : null) ?? Visuals.MosaicElasticGlassMaterial();
                 Renderer.shadowCastingMode = ShadowCastingMode.Off; Renderer.receiveShadows = false;
                 Renderer.reflectionProbeUsage = source.reflectionProbeUsage;
                 Renderer.lightProbeUsage = source.lightProbeUsage; Renderer.renderingLayerMask = source.renderingLayerMask;
                 Renderer.enabled = false;
             }
-            public void Dispose() { if (_go != null) Object.Destroy(_go); if (Mesh != null) Object.Destroy(Mesh); }
+            public void Dispose() { if (_go != null) Object.Destroy(_go); if (Mesh != null) Object.Destroy(Mesh); if (Shell?.Mesh != null) Object.Destroy(Shell.Mesh); }
         }
     }
 

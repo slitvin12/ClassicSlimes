@@ -608,6 +608,7 @@ namespace ClassicSlimes
                 if (st != null) InsertStructure(app, st);
             }
             Behaviours.Add<MosaicSlime>(s.Def);
+            if (SlimeFacets.On) Res.Mesh(SlimeFacets.ShellMesh); // preload: the facet shells are fitted on the first live slime
         }
 
         public static void MosaicLargo(SlimeDefinition d)
