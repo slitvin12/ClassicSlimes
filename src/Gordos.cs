@@ -42,8 +42,9 @@ namespace ClassicSlimes
             new Spot { Slime = "Rad", Id = IdPrefix + "Rad", Scene = "zoneStrand", Pos = new Vector3(18.3f, 1.5f, -218.3f), Yaw = 135f },
             // Powderfall Bluffs: the snowy hollow with the glowing ice blocks and a fruit tree, among quantum homes
             new Spot { Slime = "Quantum", Id = IdPrefix + "Quantum", Scene = "zoneBluffs_Area1", Pos = new Vector3(-843.5f, 44.3f, 1459.0f), Yaw = 175f },
-            // Ember Valley: the sandstone plateau between the rock pillars above the tidepool cave, among mosaic homes
-            new Spot { Slime = "Mosaic", Id = IdPrefix + "Mosaic", Scene = "zoneGorge_Area3", Pos = new Vector3(-319.2f, 35.0f, 554.3f), Yaw = 141f },
+            // Ember Valley: the middle of the sandstone plateau between the rock pillars above the tidepool cave, among mosaic homes;
+            // 15 m from the drop to the beach (gordoedge), so the burst slimes stay up (1.3.0: (-319.2, 35, 554.3), 5 m, half fell)
+            new Spot { Slime = "Mosaic", Id = IdPrefix + "Mosaic", Scene = "zoneGorge_Area3", Pos = new Vector3(-316.2f, 35.0f, 545.3f), Yaw = 141f },
         };
 
         /// <summary>Burst reward: the zone's crate, like the vanilla gordos there (SR1: 2 zone crates + a science crate).</summary>
@@ -437,7 +438,7 @@ namespace ClassicSlimes
                    $"ground {hit.collider.name} normal.y {hit.normal.y:0.00}";
         }
 
-        static bool Flat(Vector3 c, float r, float tol)
+        internal static bool Flat(Vector3 c, float r, float tol)
         {
             for (int k = 0; k < 8; k++)
             {
@@ -448,7 +449,7 @@ namespace ClassicSlimes
             return true;
         }
 
-        static bool Wet(Vector3 p)
+        internal static bool Wet(Vector3 p)
         {
             foreach (var c in Physics.OverlapSphere(p + Vector3.up * 0.6f, 2f, ~0, QueryTriggerInteraction.Collide))
                 if (c != null && (c.gameObject.layer == 4 || c.name.IndexOf("water", StringComparison.OrdinalIgnoreCase) >= 0
@@ -462,8 +463,23 @@ namespace ClassicSlimes
         /// </summary>
         public static string Candidates(string slime, int n)
         {
+            var list = CandidateList(slime, out int homeCount);
+            if (homeCount == 0) return "gordospots: no loaded homes of " + slime;
+            var sb = new StringBuilder();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                sb.AppendLine($"#{i} {c.p.x:0.0} {c.p.y:0.0} {c.p.z:0.0} {c.info}");
+            }
+            File.WriteAllText(Path.Combine(Diag.Dir, "gordospots.txt"), sb.ToString());
+            return $"gordospots {slime}: {list.Count} from {homeCount} homes" + string.Join("", sb.ToString().Split('\n').Take(Math.Max(1, n)).Select(x => " | " + x.Trim()));
+        }
+
+        /// <summary>The gordospots candidates, best score first; homeCount = the slime's loaded home spawners.</summary>
+        internal static List<(float score, Vector3 p, string info)> CandidateList(string slime, out int homeCount)
+        {
             var homes = Spawns.HomesOf(slime);
-            if (homes.Count == 0) return "gordospots: no loaded homes of " + slime;
+            homeCount = homes.Count;
             var list = new List<(float score, Vector3 p, string info)>();
             var seen = new HashSet<string>();
             foreach (var (h, _) in homes)
@@ -497,14 +513,7 @@ namespace ClassicSlimes
                         list.Add((near + hit.normal.y, g, $"homes30 {near} nearest {dMin:0} m scene {hit.collider.gameObject.scene.name} ground {hit.collider.name} view {view}"));
                     }
             list.Sort((a, b) => b.score.CompareTo(a.score));
-            var sb = new StringBuilder();
-            for (int i = 0; i < list.Count; i++)
-            {
-                var c = list[i];
-                sb.AppendLine($"#{i} {c.p.x:0.0} {c.p.y:0.0} {c.p.z:0.0} {c.info}");
-            }
-            File.WriteAllText(Path.Combine(Diag.Dir, "gordospots.txt"), sb.ToString());
-            return $"gordospots {slime}: {list.Count} from {homes.Count} homes" + string.Join("", sb.ToString().Split('\n').Take(Math.Max(1, n)).Select(x => " | " + x.Trim()));
+            return list;
         }
 
         /// <summary>gordoclear: remove the test gordos and their gordo models (also ones restored from a save).</summary>
