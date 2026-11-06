@@ -189,6 +189,7 @@ namespace ClassicSlimes
                 _f = f;
                 Mesh = Object.Instantiate(f.Template);
                 Mesh.name = CoatName + "Mesh";
+                Mesh.hideFlags = HideFlags.DontUnloadUnusedAsset;
                 Mesh.MarkDynamic();
                 int n = f.Off.Length;
                 _pos = new Il2CppStructArray<Vector3>(n);

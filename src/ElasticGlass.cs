@@ -21,6 +21,7 @@ namespace ClassicSlimes
     {
         static readonly List<ElasticGlassRig> Live = new();
         static readonly HashSet<string> Unreadable = new();
+        static readonly HashSet<string> BakeOk = new(), BakeNo = new();
         internal static bool Show = true;
         internal static double TotalMs;
         static readonly int HeldId = Shader.PropertyToID("_HeldInVac");
@@ -30,6 +31,7 @@ namespace ClassicSlimes
         SquashWobbleViaShader _warp;
         float _scanAt;
         bool _failed;
+        internal int _errors;
         int _index = -1, _vertices;
         float _maxWarp;
         double _ms;
@@ -53,9 +55,11 @@ namespace ClassicSlimes
                 var filter = skin == null ? r.GetComponent<MeshFilter>() : null;
                 var src = skin != null ? skin.sharedMesh : filter != null ? filter.sharedMesh : null;
                 if (src == null) continue;
-                // The elastic coat copies and warps the vertices on the CPU. Unreadable game meshes (Ringtail ears/tail,
-                // Angler fins, Flutter wings) get a GPU coat instead: the original mesh (skinned by the same bones), no warp.
+                // The elastic coat copies and warps the vertices on the CPU. An unreadable game mesh cannot be copied, but a
+                // skinned one can still be BAKED into our own readable mesh every frame, so its glass warps with the body
+                // (Ringtail ears/tail, Angler fins, Flutter wings). Only unskinned unreadable parts keep the rigid GPU coat.
                 bool gpu = !src.isReadable;
+                if (gpu && skin != null) gpu = !CanBake(skin, src);
                 if (gpu && Unreadable.Add(src.name)) ClassicSlimesMod.Log.Msg($"Elastic mosaic glass: mesh {src.name} ({m.name}) is not readable, rigid GPU coat");
                 // SR1's facet shell (SlimeFacets): the plain Mosaic slime over its smooth body; a largo on its body only (ears,
                 // tails and other parts keep the smooth coat), its tile surfaces smooth under the glass
@@ -80,6 +84,31 @@ namespace ClassicSlimes
             for (int i = _coats.Count - 1; i >= 0; i--)
                 if (_coats[i].Source == null || !seen.Contains(_coats[i].Source.Pointer))
                 { _coats[i].Dispose(); _coats.RemoveAt(i); }
+        }
+
+        /// <summary>
+        /// A skinned part whose game mesh is not readable can still be baked on the CPU: BakeMesh writes the posed vertices
+        /// into OUR readable mesh, so the coat can warp with the body. Probed once per mesh name; when the engine refuses,
+        /// the part keeps the rigid GPU coat (no regression).
+        /// </summary>
+        static bool CanBake(SkinnedMeshRenderer skin, Mesh src)
+        {
+            if (BakeOk.Contains(src.name)) return true;
+            if (BakeNo.Contains(src.name)) return false;
+            bool ok = false;
+            try
+            {
+                var probe = new Mesh { hideFlags = HideFlags.HideAndDontSave };
+                skin.BakeMesh(probe, true);
+                ok = probe.vertexCount > 0 && probe.vertexCount == src.vertexCount;
+                Object.Destroy(probe);
+            }
+            catch { ok = false; }
+            (ok ? BakeOk : BakeNo).Add(src.name);
+            ClassicSlimesMod.Log.Msg(ok
+                ? $"Elastic mosaic glass: mesh {src.name} bakes on the CPU - elastic coat (was rigid)"
+                : $"Elastic mosaic glass: mesh {src.name} cannot be CPU-baked - rigid GPU coat");
+            return ok;
         }
 
         public void Dispose()
@@ -147,12 +176,16 @@ namespace ClassicSlimes
                         w.NormalSq = V.Dot(w.Normal, w.Normal);
                     }
                     rig.Tick(w, valid);
+                    rig._errors = 0;
                 }
                 catch (Exception e)
                 {
-                    rig._failed = true;
+                    // A transient error (e.g. a bake mesh lost to Resources.UnloadUnusedAssets) must not strip the
+                    // shell for good: hide the coats, force a resync, and only give up after repeated failures.
                     foreach (var c in rig._coats) if (c.Renderer != null) c.Renderer.enabled = false;
-                    ClassicSlimesMod.Log.Warning("Elastic mosaic glass: " + e);
+                    rig._scanAt = 0f;
+                    if (++rig._errors >= 5) rig._failed = true;
+                    if (rig._errors == 1) ClassicSlimesMod.Log.Warning("Elastic mosaic glass: " + e);
                 }
             }
             TotalMs = TotalMs * 0.9 + 0.1 * (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
@@ -176,7 +209,13 @@ namespace ClassicSlimes
                 // useScale: true = vertices in the renderer's own local space. With false Unity keeps the
                 // transform's scale inside the vertices, and the coat (a child of that transform) gets it twice:
                 // on 2x largos that drew a second, double-size glass bubble around the slime.
-                if (c.Skin != null) c.Skin.BakeMesh(c.Mesh, true);
+                if (c.Skin != null)
+                {
+                    // The facet coat's bake target is not on any MeshFilter, so Resources.UnloadUnusedAssets (menu /
+                    // Esc / scene load) can destroy it; rebuild instead of throwing BakeMesh(null) and losing the shell.
+                    if (!c.EnsureBakeMesh()) { c.Renderer.enabled = false; continue; }
+                    c.Skin.BakeMesh(c.Mesh, true);
+                }
                 else if (c.Shell == null) c.Mesh.vertices = c.Rest;
                 var verts = c.Skin != null || c.Shell == null ? c.Mesh.vertices : c.Rest;
                 var vs = MemoryMarshal.Cast<Vector3, V>(verts.AsSpan());
@@ -202,13 +241,14 @@ namespace ClassicSlimes
                 }
                 var ns = c.Skin != null ? c.Mesh.normals : c.Normals;
                 var normals = MemoryMarshal.Cast<Vector3, V>(ns.AsSpan());
+                bool hasN = normals.Length >= vs.Length;
                 for (int j = 0; j < vs.Length; j++)
                 {
                     var p = vs[j];
                     var displacement = warp ? Displace(p, w, m, inv, localDelta) : V.Zero;
                     _maxWarp = MathF.Max(_maxWarp, displacement.Length());
                     float a = j < c.Alpha.Length ? 1f - c.Alpha[j] : 0f;
-                    vs[j] = p + displacement + normals[j] * (a * a * alpha + 0.012f);
+                    vs[j] = p + displacement + (hasN ? normals[j] : V.Zero) * (a * a * alpha + 0.012f);
                 }
                 c.Mesh.vertices = verts;
                 c.Mesh.RecalculateBounds();
@@ -257,7 +297,8 @@ namespace ClassicSlimes
         {
             internal readonly Renderer Source;
             internal readonly SkinnedMeshRenderer Skin;
-            internal readonly Mesh Original, Mesh;
+            internal readonly Mesh Original;
+            internal Mesh Mesh;
             internal readonly UnityEngine.Renderer Renderer;
             /// <summary>Unreadable source mesh: the coat draws the original mesh on the GPU (skinned by the source bones), no CPU warp.</summary>
             internal readonly bool Gpu;
@@ -276,7 +317,9 @@ namespace ClassicSlimes
             internal Coat(UnityEngine.Renderer source, SkinnedMeshRenderer skin, Mesh original, Material material, bool gpu = false, Transform facets = null)
             {
                 Source = source; Skin = skin; Original = original; Material = material; Transform = source.transform; Gpu = gpu;
-                Rigid = gpu || material.shader != null && material.shader.name.Contains("NoWobble");
+                // Unreadable parts baked on the CPU warp with the body (that is why they are baked); readable "_NoWobble"
+                // parts stay rigid so their glass keeps matching their rigid source mesh.
+                Rigid = gpu || original.isReadable && material.shader != null && material.shader.name.Contains("NoWobble");
                 Facet = facets != null; Version = SlimeFacets.Version;
                 _go = new GameObject("MosaicElasticGlass") { layer = source.gameObject.layer };
                 _go.transform.SetParent(Transform, false);
@@ -299,10 +342,18 @@ namespace ClassicSlimes
                 }
                 else
                 {
-                    Rest = original.vertices; Normals = original.normals;
-                    var colors = original.colors; Alpha = new float[original.vertexCount];
-                    for (int i = 0; i < Alpha.Length; i++) Alpha[i] = colors != null && i < colors.Length ? colors[i].a : 1f;
-                    Mesh = Object.Instantiate(original); Mesh.name = "MosaicElasticGlassMesh"; Mesh.MarkDynamic();
+                    if (original.isReadable)
+                    {
+                        Rest = original.vertices; Normals = original.normals;
+                        var colors = original.colors; Alpha = new float[original.vertexCount];
+                        for (int i = 0; i < Alpha.Length; i++) Alpha[i] = colors != null && i < colors.Length ? colors[i].a : 1f;
+                    }
+                    else
+                    {
+                        // Unreadable skinned part baked on the CPU each frame: no rest data, a uniform thin glass coat.
+                        Rest = null; Normals = null; Alpha = Array.Empty<float>();
+                    }
+                    Mesh = Bake(original);
                     if (Facet) Shell = SlimeFacets.Shell.Create(facets, source, skin, original, Rest, Normals, Alpha);
                     if (Shell != null) _go.name = SlimeFacets.CoatName;
                     _go.AddComponent<MeshFilter>().sharedMesh = Shell != null ? Shell.Mesh : Mesh;
@@ -314,6 +365,28 @@ namespace ClassicSlimes
                 Renderer.lightProbeUsage = source.lightProbeUsage; Renderer.renderingLayerMask = source.renderingLayerMask;
                 Renderer.enabled = false;
             }
+            /// <summary>The CPU bake target. <see cref="HideFlags.DontUnloadUnusedAsset"/> keeps it alive: on a facet coat it
+            /// is not on any MeshFilter (that draws <see cref="SlimeFacets.Shell.Mesh"/>), so a native reference never protects
+            /// it and Resources.UnloadUnusedAssets would otherwise destroy it (then BakeMesh(null) killed the whole shell).
+            /// An unreadable source cannot be instantiated into a readable copy; a fresh mesh is the BakeMesh target instead.</summary>
+            static Mesh Bake(Mesh original)
+            {
+                var m = original.isReadable ? Object.Instantiate(original) : new Mesh();
+                m.name = "MosaicElasticGlassMesh";
+                m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                m.MarkDynamic();
+                return m;
+            }
+
+            /// <summary>Rebuilds the bake target if it was destroyed; false when it cannot (the coat is then hidden, not fatal).</summary>
+            internal bool EnsureBakeMesh()
+            {
+                if (Mesh != null) return true;
+                if (Original == null) return false;
+                try { Mesh = Bake(Original); } catch { return false; }
+                return Mesh != null;
+            }
+
             public void Dispose() { if (_go != null) Object.Destroy(_go); if (Mesh != null) Object.Destroy(Mesh); if (Shell?.Mesh != null) Object.Destroy(Shell.Mesh); }
         }
     }
