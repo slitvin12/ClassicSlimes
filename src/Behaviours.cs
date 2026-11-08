@@ -309,13 +309,19 @@ namespace ClassicSlimes
             if (Time.time >= _nextGhost)
             {
                 _nextGhost = Time.time + GhostDelay();
-                if (_ghosts.Count < MaxGhosts && U.Grounded(transform, s) && U.GroundPoint(transform.position, 2f * s, 10f, out var p))
+                // a ghost is another place the slime could be: while it is solid (not hungry) never beyond a corral wall
+                if (_ghosts.Count < MaxGhosts && U.Grounded(transform, s) && U.GroundPoint(transform.position, 2f * s, 10f, out var p)
+                    && (Phasing || !CrossesWall(transform.position, p + Vector3.up * (0.5f * s), s)))
                     SpawnGhost(p);
             }
             if (Time.time >= _nextTeleport)
             {
                 _nextTeleport = Time.time + TeleportDelay();
-                if (U.Agitation(_emo) > 0.1f && _ghosts.Count > 0) TeleportTo(_ghosts[U.Rng.Next(_ghosts.Count)]);
+                if (U.Agitation(_emo) > 0.1f && _ghosts.Count > 0)
+                {
+                    var target = ReachableGhost();
+                    if (target != null) TeleportTo(target);
+                }
             }
         }
 
@@ -534,9 +540,12 @@ namespace ClassicSlimes
         }
 
         // ------------------------------------------------------------- phasing through corral walls
-        // Hungry -> the slime is "elsewhere" enough to drift through corral walls (collisions with every wall
-        // collider of every corral (WallUpgrader standard + upgrade walls) are ignored). Fed again -> solid again,
-        // but only once it is not stuck inside a wall.
+        // Hungry (above the game's own cutoff SlimeEmotions.HUNGRY_CUTOFF: the hungry face) -> the slime is "elsewhere"
+        // enough to drift through corral walls (collisions with every wall collider of every corral (WallUpgrader
+        // standard + upgrade walls) are ignored). Fed again -> solid again at once; if it is still inside a wall it steps
+        // back to the side it came from. While solid, its ghosts and teleports never cross a corral wall either.
+        // Before 1.3.4 a fed slime swapped places with ghosts that had wandered through the walls, kept ignoring the
+        // walls until it was out of the wall (on either side), and new / normally fed slimes (hunger 0.5) counted as hungry.
         static readonly List<Collider> Walls = new();
         static readonly HashSet<IntPtr> WallSet = new();
         static float _wallsAt = -999f;
@@ -544,6 +553,13 @@ namespace ClassicSlimes
         readonly HashSet<IntPtr> _ignoredSet = new();
         Collider[] _cols;
         float _nextWallCheck;
+        Vector3 _lastClear;     // last spot where it was not inside a corral wall
+        bool _hasClear;
+        // corral walls around the slime with their bounds, cached: its ghosts test them every few frames
+        readonly List<Collider> _nearWalls = new();
+        readonly List<Vector3> _nearMin = new(), _nearMax = new();
+        float _nearAt = -999f;
+        Vector3 _nearPos;
         public bool Phasing => _ignored.Count > 0;
 
         static void RefreshWalls()
@@ -565,6 +581,68 @@ namespace ClassicSlimes
 
         public static int WallCount { get { RefreshWalls(); return Walls.Count; } }
 
+        void RefreshNearWalls()
+        {
+            var pos = transform.position;
+            if (Time.time - _nearAt < 2f && (pos - _nearPos).sqrMagnitude < 25f) return;
+            _nearAt = Time.time; _nearPos = pos;
+            RefreshWalls();
+            _nearWalls.Clear(); _nearMin.Clear(); _nearMax.Clear();
+            foreach (var w in Walls)
+            {
+                if (w == null) continue;
+                var b = w.bounds;
+                if (b.SqrDistance(pos) > 1600f) continue;   // 40 m: ghosts appear within 10 m and wander a few metres
+                _nearWalls.Add(w); _nearMin.Add(b.min); _nearMax.Add(b.max);
+            }
+        }
+
+        /// <summary>True when the straight way a -> b (both at body-root height) goes through a corral wall.</summary>
+        [Il2CppInterop.Runtime.Attributes.HideFromIl2Cpp]
+        public bool CrossesWall(Vector3 a, Vector3 b, float scale)
+        {
+            RefreshNearWalls();
+            if (_nearWalls.Count == 0) return false;
+            var mid = (a + b) * 0.5f;
+            float reach = (b - a).magnitude * 0.5f + 1.5f * scale + 0.5f;
+            // the root sits about half a body above the ground: one ray near the feet, one at body height
+            var feet = Vector3.up * (-0.2f * scale);
+            var body = Vector3.up * (0.4f * scale);
+            for (int i = 0; i < _nearWalls.Count; i++)
+            {
+                if (U.SqrDistance(_nearMin[i], _nearMax[i], mid) > reach * reach) continue;
+                var w = _nearWalls[i];
+                if (w == null) continue;
+                if (U.SegmentHits(w, a + feet, b + feet) || U.SegmentHits(w, a + body, b + body)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>A ghost to swap places with. While solid, the ghosts beyond a corral wall collapse first; hungry
+        /// (phasing) -> any ghost, as before.</summary>
+        [Il2CppInterop.Runtime.Attributes.HideFromIl2Cpp]
+        QuantumGhost ReachableGhost()
+        {
+            if (!Phasing) DropGhostsBeyondWalls();
+            _ghosts.RemoveAll(g => g == null);
+            return _ghosts.Count > 0 ? _ghosts[U.Rng.Next(_ghosts.Count)] : null;
+        }
+
+        /// <summary>Ghosts on the other side of a corral wall from a solid slime collapse (e.g. right after it ate).</summary>
+        void DropGhostsBeyondWalls()
+        {
+            float s = transform.lossyScale.x;
+            var from = transform.position;
+            for (int i = _ghosts.Count - 1; i >= 0; i--)
+            {
+                var g = _ghosts[i];
+                if (g == null) { _ghosts.RemoveAt(i); continue; }
+                if (!CrossesWall(from, g.transform.position + Vector3.up * (0.5f * s), s)) continue;
+                _ghosts.RemoveAt(i);
+                g.Pop(true);
+            }
+        }
+
         bool InsideIgnoredWall()
         {
             float r = 0.45f * transform.lossyScale.x;
@@ -578,7 +656,7 @@ namespace ClassicSlimes
             if (Time.time < _nextWallCheck) return;
             _nextWallCheck = Time.time + 0.3f;
             bool held = _vac != null && _vac.IsHeld();
-            bool want = Cfg.QuantumPhaseWalls.Value && !held && U.Hunger(_emo) >= 0.5f;
+            bool want = Cfg.QuantumPhaseWalls.Value && !held && U.IsHungry(_emo);
             if (want)
             {
                 RefreshWalls();
@@ -596,11 +674,29 @@ namespace ClassicSlimes
                     foreach (var c in _cols) if (c != null) Physics.IgnoreCollision(c, w, true);
                     _ignored.Add(w); _ignoredSet.Add(w.Pointer);
                 }
-                if (_ignored.Count > 0 && _phaseEnd <= 0f && Cfg.QuantumHologram.Value && InsideIgnoredWall()) StartPhase(0.6f);
+                bool inside = _ignored.Count > 0 && InsideIgnoredWall();
+                if (!inside) { _lastClear = transform.position; _hasClear = true; }
+                else if (_phaseEnd <= 0f && Cfg.QuantumHologram.Value) StartPhase(0.6f);
                 return;
             }
-            if (_ignored.Count == 0 || InsideIgnoredWall()) return;
+            if (_ignored.Count == 0) { _lastClear = transform.position; _hasClear = true; return; }
+            // fed while still inside a wall: it does not finish the pass, it steps back to the side it came from
+            // (held by the vacuum -> the vacuum pulls it out; the walls come back once it is out, as before)
+            if (InsideIgnoredWall() && (held || !StepBackOutOfWall())) return;
             RestoreWalls();
+            DropGhostsBeyondWalls();
+        }
+
+        bool StepBackOutOfWall()
+        {
+            if (!_hasClear) return false;
+            var pos = transform.position;
+            if ((_lastClear - pos).sqrMagnitude > 16f) return false;   // it teleported meanwhile: wait until it is out, as before
+            var to = _lastClear + Vector3.up * 0.05f;
+            if (_rb != null) { _rb.position = to; if (!_rb.isKinematic) _rb.linearVelocity = Vector3.zero; }
+            transform.position = to;
+            if (Cfg.QuantumHologram.Value) StartPhase(U.Rand(0.4f, 0.6f));
+            return true;
         }
 
         void RestoreWalls()
@@ -669,7 +765,7 @@ namespace ClassicSlimes
         public QuantumGhost(IntPtr ptr) : base(ptr) { }
 
         public QuantumSlime Owner;
-        float _born, _life, _phase, _nextTurn;
+        float _born, _life, _phase, _nextTurn, _nextWallProbe;
         Vector3 _vel, _scale;
 
         void Start()
@@ -692,8 +788,21 @@ namespace ClassicSlimes
                 _vel = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * U.Rand(0.15f, 0.7f);
             }
             var p = transform.position + _vel * dt;
+            bool moved = true;
             if (Physics.Raycast(p + Vector3.up * 1.2f, Vector3.down, out var hit, 2.5f, U.GroundMask, QueryTriggerInteraction.Ignore)) p.y = hit.point.y;
-            else { _vel = -_vel; p = transform.position; }
+            else { _vel = -_vel; p = transform.position; moved = false; }
+            // the ghost of a solid (not hungry) slime turns back at a corral wall instead of drifting through it
+            if (moved && Time.time >= _nextWallProbe && !Owner.Phasing)
+            {
+                _nextWallProbe = Time.time + 0.1f;
+                float s = Owner.transform.lossyScale.x, speed = _vel.magnitude;
+                if (speed > 1e-3f)
+                {
+                    var lift = Vector3.up * (0.5f * s);
+                    var ahead = p + _vel * (0.6f * s / speed);
+                    if (Owner.CrossesWall(transform.position + lift, ahead + lift, s)) { _vel = -_vel; p = transform.position; }
+                }
+            }
             transform.position = p;
             if (_vel.sqrMagnitude > 0.001f)
                 transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(_vel), dt * 2f);

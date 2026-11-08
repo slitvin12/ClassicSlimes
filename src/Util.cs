@@ -485,6 +485,49 @@ namespace ClassicSlimes
             try { return e != null ? e.Get(SlimeEmotions.Emotion.HUNGER) : 1f; } catch { return 1f; }
         }
 
+        static float _hungryCutoff = -1f;
+
+        /// <summary>The game's "hungry" cutoff (SlimeEmotions.HUNGRY_CUTOFF, 0.666 in SR1): hungry face, goes for food.
+        /// New and normally fed slimes sit around 0.5; a meal takes about a third off.</summary>
+        public static float HungryCutoff
+        {
+            get
+            {
+                if (_hungryCutoff < 0f)
+                {
+                    float v = 0f;
+                    try { v = SlimeEmotions.HUNGRY_CUTOFF; } catch { }
+                    _hungryCutoff = v > 0.1f && v < 1f ? v : 0.666f;
+                }
+                return _hungryCutoff;
+            }
+        }
+
+        /// <summary>Hungry in the game's sense. Unknown hunger (no emotions, read error) counts as fed.</summary>
+        public static bool IsHungry(SlimeEmotions e)
+        {
+            try { return e != null && e.Get(SlimeEmotions.Emotion.HUNGER) > HungryCutoff; } catch { return false; }
+        }
+
+        /// <summary>Does the segment a -> b go through collider c? Cast both ways: a ray misses the back faces of a mesh.</summary>
+        public static bool SegmentHits(Collider c, Vector3 a, Vector3 b)
+        {
+            var d = b - a;
+            float len = d.magnitude;
+            if (len < 1e-4f) return false;
+            var dir = d * (1f / len);
+            return c.Raycast(new Ray(a, dir), out _, len) || c.Raycast(new Ray(b, dir * -1f), out _, len);
+        }
+
+        /// <summary>Squared distance from a point to an axis-aligned box (plain C#, no interop calls).</summary>
+        public static float SqrDistance(Vector3 min, Vector3 max, Vector3 p)
+        {
+            float dx = Math.Max(0f, Math.Max(min.x - p.x, p.x - max.x));
+            float dy = Math.Max(0f, Math.Max(min.y - p.y, p.y - max.y));
+            float dz = Math.Max(0f, Math.Max(min.z - p.z, p.z - max.z));
+            return dx * dx + dy * dy + dz * dz;
+        }
+
         public static bool IsDay()
         {
             try { var h = SceneContext.Instance.TimeDirector.CurrHour(); return h >= 6f && h < 18.5f; } catch { return true; }

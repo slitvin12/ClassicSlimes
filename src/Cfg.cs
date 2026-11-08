@@ -50,8 +50,8 @@ namespace ClassicSlimes
             RadPerSecond = Cat.CreateEntry("RadExposurePerSecond", 5f, "Radiation absorbed per second inside a rad aura (SR1 value: 5)");
             RadDamagePerTick = Cat.CreateEntry("RadDamage", 4, "Damage dealt each time accumulated radiation overflows");
             RadAuraDamagesPlayer = Cat.CreateEntry("RadAuraDamagesPlayer", true, "Rad aura hurts the player");
-            QuantumTeleports = Cat.CreateEntry("QuantumTeleports", true, "Quantum slimes create ghosts and teleport");
-            QuantumPhaseWalls = Cat.CreateEntry("QuantumPhaseWalls", true, "Hungry quantum slimes phase through corral walls (fed again they are solid again)");
+            QuantumTeleports = Cat.CreateEntry("QuantumTeleports", true, "Quantum slimes create ghosts and teleport (while not hungry - never through corral walls)");
+            QuantumPhaseWalls = Cat.CreateEntry("QuantumPhaseWalls", true, "Hungry quantum slimes (hungry face: above the game's hunger cutoff) phase through corral walls; fed again they are solid again");
             QuantumHologram = Cat.CreateEntry("QuantumHologram", true, "Quantum slimes now and then flicker like a hologram (horizontal scanlines)");
             GlitchTrail = Cat.CreateEntry("GlitchTrail", true, "Glitch slimes leave a trail of pixels behind them");
             MosaicGlints = Cat.CreateEntry("MosaicGlints", true, "Mosaic slimes create glints");

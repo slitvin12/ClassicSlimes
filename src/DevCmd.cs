@@ -245,7 +245,7 @@ namespace ClassicSlimes
                         var cam = Camera.main; var q = cam != null ? Nearest<QuantumSlime>(cam.transform.position) : null;
                         var qs = q != null ? q.GetComponent<QuantumSlime>() : null;
                         L($"walls={QuantumSlime.WallCount} nearest quantum: " + (qs == null ? "none" :
-                            $"phasing={qs.Phasing} hunger={U.Hunger(q.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeEmotions>()):0.00} dist={(q.transform.position - cam.transform.position).magnitude:0.0}"));
+                            $"phasing={qs.Phasing} hunger={U.Hunger(q.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeEmotions>()):0.00}/{U.HungryCutoff:0.000} dist={(q.transform.position - cam.transform.position).magnitude:0.0}"));
                         break;
                     }
                 case "fx":   // fx <name> [scale] [dist]: play a game FX prefab in front of the camera
