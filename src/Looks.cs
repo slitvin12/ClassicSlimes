@@ -371,11 +371,28 @@ namespace ClassicSlimes
             return _domes[i];
         }
 
+        static Material _largoDome0;
+        public static Material LargoDome0()
+        {
+            if (_largoDome0 != null) return _largoDome0;
+            var src = Dome(0);
+            if (src == null) return null;
+            var m = Object.Instantiate(src);
+            m.name = "ClassicSlimes_RadDome0Largo";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Flt("_Opacity", 0.038f);
+            m.Flt("_Smoothness", 0.38f);
+            m.Flt("_ReflectionIntensity", 11f);
+            m.Flt("_DistortionStrength", 1.8f);
+            _largoDome0 = Keep(m, "RadDome0Largo");
+            return _largoDome0;
+        }
+
         /// <summary>The radiation dome object: its local scale is the dome diameter (set by RadSlime).</summary>
-        public static GameObject MakeDome(Transform parent, Vector3 localPos, float diameter, int style = -1)
+        public static GameObject MakeDome(Transform parent, Vector3 localPos, float diameter, int style = -1, bool largo = false)
         {
             int i = Mathf.Clamp(style < 0 ? DomeStyle : style, 0, _domes.Length - 1);
-            var mat = Dome(i);
+            var mat = (largo && i == 0) ? (LargoDome0() ?? Dome(0)) : Dome(i);
             if (mat == null && i != 1) { i = 1; mat = Dome(1); }
             if (!DomeIsBillboard(i)) return Sphere("RadAura", parent, localPos, diameter, mat);
             var root = new GameObject("RadAura");
@@ -580,7 +597,22 @@ namespace ClassicSlimes
         /// SimpleGlass lacks the native vertex warp; ElasticGlassRig supplies it without changing the body's physics.
         /// </summary>
         public static int MosaicGlassMode = 3;
-        internal static Material MosaicElasticGlassMaterial() => ShellMat();
+        static Material _largoShell;
+        internal static Material MosaicElasticGlassMaterial(bool largo = false)
+        {
+            var baseMat = ShellMat();
+            if (!largo || baseMat == null) return baseMat;
+            if (_largoShell != null) return _largoShell;
+            var m = Object.Instantiate(baseMat);
+            m.name = "ClassicSlimes_MosaicLargoGlass";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Flt("_Opacity", 0.02f);
+            m.Flt("_Smoothness", 0.68f);
+            m.Flt("_ReflectionIntensity", 145f);
+            m.Flt("_DistortionStrength", 0.9f);
+            _largoShell = Keep(m, "MosaicLargoShell");
+            return _largoShell;
+        }
         public static string MosaicCoatTemplate = "RadiantAura_strong";
 
         static Material _coat;
@@ -672,7 +704,7 @@ namespace ClassicSlimes
                 if (_flare != null) return _flare;
                 var m = Mat.Clone("MosaicFlare", "fxDiamondGlint");
                 if (m == null) return null;
-                m.Col("_Color", new Color(18f, 20f, 24f, 1f));
+                m.Col("_Color", new Color(7.5f, 8.5f, 10.5f, 1f));
                 _flare = Keep(m, "MosaicFlare");
                 return _flare;
             }

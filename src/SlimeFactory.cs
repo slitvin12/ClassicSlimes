@@ -221,6 +221,20 @@ namespace ClassicSlimes
             else def.FavoriteToyIdents = new Il2CppReferenceArray<ToyDefinition>(0);
             def.RefreshEatmap();
             def.MakeVaccable();
+            try
+            {
+                foreach (var grp in Resources.FindObjectsOfTypeAll<IdentifiableTypeGroup>())
+                {
+                    if (grp == null) continue;
+                    if (grp.name == "BaseSlimeGroup" || grp.name == "VaccableBaseSlimeGroup" || grp.name == "SlimesGroup")
+                    {
+                        if (grp._memberTypes != null && !grp._memberTypes.Contains(def)) grp._memberTypes.Add(def);
+                        var rt = grp.GetRuntimeObject();
+                        if (rt != null && !rt.IsMember(def)) rt.AddMember(def);
+                    }
+                }
+            }
+            catch { }
 
             try { s.Customize?.Invoke(s); }
             catch (Exception e) { ClassicSlimesMod.Log.Error($"Customize {s.Name} failed: {e}"); }

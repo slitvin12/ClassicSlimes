@@ -148,9 +148,12 @@ namespace ClassicSlimes
             {
                 // the rainbow reflection slowly runs over the glass (one shared material, once per frame)
                 _irisFrame = Time.frameCount;
-                var glass = Visuals.MosaicElasticGlassMaterial();
                 float t = Time.time * Visuals.MosaicIrisSpeed;
-                if (glass != null && glass.HasProperty(ReflectionId)) glass.SetTextureOffset(ReflectionId, new Vector2(t - Mathf.Floor(t), (t * 0.37f) - Mathf.Floor(t * 0.37f)));
+                var ofs = new Vector2(t - Mathf.Floor(t), (t * 0.37f) - Mathf.Floor(t * 0.37f));
+                var glass = Visuals.MosaicElasticGlassMaterial(false);
+                if (glass != null && glass.HasProperty(ReflectionId)) glass.SetTextureOffset(ReflectionId, ofs);
+                var lglass = Visuals.MosaicElasticGlassMaterial(true);
+                if (lglass != null && lglass != glass && lglass.HasProperty(ReflectionId)) lglass.SetTextureOffset(ReflectionId, ofs);
             }
             var centres = ctrl.squashWobbleCentres; var normals = ctrl.squashNormals;
             var positions = ctrl.squashPositions; var offsets = ctrl.wobbleOffsets;
@@ -359,7 +362,9 @@ namespace ClassicSlimes
                     _go.AddComponent<MeshFilter>().sharedMesh = Shell != null ? Shell.Mesh : Mesh;
                     Renderer = _go.AddComponent<MeshRenderer>();
                 }
-                Renderer.sharedMaterial = (Shell != null ? GordoFacets.Glass() : null) ?? Visuals.MosaicElasticGlassMaterial();
+                bool isLargo = false;
+                try { var eat = source.GetComponentInParent<Il2Cpp.SlimeEat>(); isLargo = eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo; } catch { }
+                Renderer.sharedMaterial = (Shell != null ? GordoFacets.Glass(isLargo) : null) ?? Visuals.MosaicElasticGlassMaterial(isLargo);
                 Renderer.shadowCastingMode = ShadowCastingMode.Off; Renderer.receiveShadows = false;
                 Renderer.reflectionProbeUsage = source.reflectionProbeUsage;
                 Renderer.lightProbeUsage = source.lightProbeUsage; Renderer.renderingLayerMask = source.renderingLayerMask;

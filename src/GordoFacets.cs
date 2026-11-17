@@ -175,15 +175,26 @@ namespace ClassicSlimes
             m.RecalculateTangents();
         }
 
+        static Material _largoGlass;
         /// <summary>Copy of the Mosaic slime glass (tune live: flt/col MosaicFacets ...).</summary>
-        public static Material Glass()
+        public static Material Glass(bool largo = false)
         {
-            if (_glass != null) return _glass;
-            var src = Visuals.MosaicElasticGlassMaterial();
+            if (largo && _largoGlass != null) return _largoGlass;
+            if (!largo && _glass != null) return _glass;
+            var src = Visuals.MosaicElasticGlassMaterial(largo);
             if (src == null) return null;
             var m = Object.Instantiate(src);
-            m.name = "ClassicSlimes_MosaicGordoGlass";
+            m.name = largo ? "ClassicSlimes_MosaicLargoFacetGlass" : "ClassicSlimes_MosaicGordoGlass";
             m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            if (largo)
+            {
+                m.Flt("_NormalStrength", 2.2f); m.Flt("_DistortionStrength", 0.9f);
+                m.Flt("_ReflectionFresnelPower", 2.4f); m.Flt("_ReflectionIntensity", 145f);
+                m.Flt("_Smoothness", 0.68f); m.Flt("_Opacity", 0.02f);
+                Visuals.Mats["MosaicLargoFacets"] = m;
+                _largoGlass = Mat.Track(m);
+                return _largoGlass;
+            }
             // SR1's big facets: deep bevels, strong refraction, a wide rainbow rim (tuned in game)
             m.Flt("_NormalStrength", 5f); m.Flt("_DistortionStrength", 2f); m.Flt("_ReflectionFresnelPower", 1.2f);
             Visuals.Mats["MosaicFacets"] = m;
@@ -231,9 +242,11 @@ namespace ClassicSlimes
         /// <summary>Main.OnUpdate: the rainbow reflection slowly runs over the facets, like over the Mosaic slimes.</summary>
         public static void Tick()
         {
-            if (_glass == null || Visuals.MosaicIrisSpeed == 0f || IrisDrift == 0f) return;
+            if (Visuals.MosaicIrisSpeed == 0f || IrisDrift == 0f) return;
             float t = Time.time * Visuals.MosaicIrisSpeed * IrisDrift;
-            _glass.SetTextureOffset(ReflectionId, new Vector2(t - Mathf.Floor(t), t * 0.37f - Mathf.Floor(t * 0.37f)));
+            var ofs = new Vector2(t - Mathf.Floor(t), t * 0.37f - Mathf.Floor(t * 0.37f));
+            if (_glass != null) _glass.SetTextureOffset(ReflectionId, ofs);
+            if (_largoGlass != null) _largoGlass.SetTextureOffset(ReflectionId, ofs);
         }
 
         /// <summary>The Mosaic gordo prefab and its live copies.</summary>

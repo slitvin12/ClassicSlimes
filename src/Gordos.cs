@@ -60,6 +60,13 @@ namespace ClassicSlimes
 
         static MelonLogger.Instance Log => ClassicSlimesMod.Log;
 
+        public static bool IsClassicGordoType(IdentifiableType t)
+        {
+            if (t == null) return false;
+            foreach (var v in Types.Values) if (v != null && v.Pointer == t.Pointer) return true;
+            return false;
+        }
+
         // ---------------------------------------------------------------- types (main menu, after the slimes)
 
         /// <summary>
@@ -180,6 +187,7 @@ namespace ClassicSlimes
             {
                 var gm = SceneContext.Instance.GameModel;
                 eaten = gm != null && gm.gordos.ContainsKey(sp.Id) ? gm.gordos[sp.Id].GordoEatenCount : eat.GetEatenCount();
+                if (eaten == GordoEat.ALREADY_BURST_FLAG && go.activeSelf) go.SetActive(false);
             }
             catch { }
             var par = go.transform.parent;

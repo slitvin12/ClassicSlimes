@@ -226,4 +226,225 @@ namespace ClassicSlimes
             ClassicSlimesMod.Log.Msg("Gallery: " + string.Join(", ", Candidates) + " || " + string.Join(", ", Visuals.Mats.Keys));
         }
     }
+
+    /// <summary>
+    /// Ensures classic SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) are accepted by GordoSnare.FoodTypeGroup
+    /// and always render visibly with their child mesh/materials/world-scale on Gordo Snares.
+    /// </summary>
+    [HarmonyPatch]
+    static class GordoSnareBaitPatch
+    {
+        static readonly Dictionary<IntPtr, IdentifiableType> _lastBait = new();
+
+        static void EnsureSnareFoodGroup(GordoSnare snare)
+        {
+            var fg = snare != null ? snare.FoodTypeGroup : null;
+            if (fg == null) return;
+            foreach (var f in Foods.All)
+            {
+                var t = f.Type;
+                if (t == null) continue;
+                try
+                {
+                    if (fg._memberTypes != null && !fg._memberTypes.Contains(t)) fg._memberTypes.Add(t);
+                    var rt = fg.GetRuntimeObject();
+                    if (rt != null && !rt.IsMember(t)) rt.AddMember(t);
+                }
+                catch { }
+            }
+        }
+
+        public static void EnsureBaitVisual(GordoSnare snare, IdentifiableType baitType)
+        {
+            if (snare == null) return;
+            EnsureSnareFoodGroup(snare);
+            if (baitType != null) _lastBait[snare.Pointer] = baitType;
+            else _lastBait.TryGetValue(snare.Pointer, out baitType);
+            if (baitType == null)
+            {
+                // Fallback: resolve from Bait's IdentifiableActor if instantiated from prefab
+                var bGo = snare.Bait;
+                var ida = bGo != null ? bGo.GetComponentInChildren<IdentifiableActor>(true) : null;
+                if (ida != null) baitType = ida.identType;
+            }
+            if (baitType == null || baitType.prefab == null) return;
+            Foods.FixLemon(baitType.prefab, false);
+            var baitGo = snare.Bait;
+            if (baitGo == null) return;
+            Foods.FixLemon(baitGo, true);
+
+            MeshFilter srcMf = null;
+            MeshRenderer srcMr = null;
+            foreach (var mf in baitType.prefab.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf == null || mf.sharedMesh == null) continue;
+                var mr = mf.GetComponent<MeshRenderer>();
+                if (mr != null && mr.sharedMaterial != null) { srcMf = mf; srcMr = mr; break; }
+            }
+            if (srcMf == null || srcMr == null) return;
+
+            var bMf = baitGo.GetComponent<MeshFilter>();
+            var bMr = baitGo.GetComponent<MeshRenderer>();
+            if (bMf != null && bMr != null)
+            {
+                if (bMf.sharedMesh == null) bMf.sharedMesh = srcMf.sharedMesh;
+                if (bMr.sharedMaterial == null || bMr.sharedMaterials == null || bMr.sharedMaterials.Length == 0)
+                    bMr.sharedMaterials = srcMr.sharedMaterials;
+                bMr.enabled = true;
+                bool isOurs = Foods.All.Exists(x => x.Type == baitType);
+                if (isOurs)
+                {
+                    var ws = srcMf.transform.lossyScale;
+                    var ps = baitGo.transform.parent != null ? baitGo.transform.parent.lossyScale : Vector3.one;
+                    if (ps.x > 1e-4f && ps.y > 1e-4f && ps.z > 1e-4f)
+                        baitGo.transform.localScale = new Vector3(ws.x / ps.x, ws.y / ps.y, ws.z / ps.z);
+                }
+            }
+            foreach (var cmr in baitGo.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                if (cmr == null) continue;
+                var cmf = cmr.GetComponent<MeshFilter>();
+                if (cmf != null && cmf.sharedMesh != null) { cmr.enabled = true; cmr.gameObject.SetActive(true); }
+            }
+            if (!baitGo.activeSelf) baitGo.SetActive(true);
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(GordoSnare), nameof(GordoSnare.Awake))]
+        static void PostAwake(GordoSnare __instance)
+        {
+            try { EnsureSnareFoodGroup(__instance); } catch { }
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(GordoSnare), nameof(GordoSnare.AttachBait))]
+        static void PostAttach(GordoSnare __instance, IdentifiableType __0)
+        {
+            try { EnsureBaitVisual(__instance, __0); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("GordoSnare AttachBait visual: " + e.Message); }
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(GordoSnare), nameof(GordoSnare.SetModel))]
+        static void PostSetModel(GordoSnare __instance)
+        {
+            try { if (!__instance.HasSnaredGordo()) EnsureBaitVisual(__instance, null); }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// Allows Quicksilver slimes to sit calmly on benches, couches, chairs and #1 Slime Stages (SlimeAttachPoint)
+    /// without their ground-runner / flee impulse snapping the ConfigurableJoint.
+    /// </summary>
+    [HarmonyPatch]
+    static class QuicksilverBenchPatch
+    {
+        [HarmonyPrefix, HarmonyPatch(typeof(SlimeAttachPoint), nameof(SlimeAttachPoint.OnTriggerEnter))]
+        static void PreTrigger(SlimeAttachPoint __instance, Collider col)
+        {
+            try
+            {
+                if (__instance == null || col == null || __instance._slime != null) return;
+                var rb = col.attachedRigidbody;
+                var qs = rb != null ? rb.GetComponent<QuicksilverSlime>() : col.GetComponentInParent<QuicksilverSlime>();
+                if (qs != null) qs.EnterSeatGrace(1.0f);
+            }
+            catch { }
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(SlimeAttachPoint), nameof(SlimeAttachPoint.OnAttach))]
+        static void PostAttach(SlimeAttachPoint __instance)
+        {
+            try
+            {
+                var go = __instance != null ? __instance._slime : null;
+                var qs = go != null ? go.GetComponent<QuicksilverSlime>() : null;
+                if (qs == null) return;
+                qs.SetSeated(true);
+                if (__instance._joint != null)
+                {
+                    __instance._joint.breakForce = float.PositiveInfinity;
+                    __instance._joint.breakTorque = float.PositiveInfinity;
+                }
+            }
+            catch { }
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(SlimeAttachPoint), nameof(SlimeAttachPoint.OnDetach))]
+        static void PreDetach(SlimeAttachPoint __instance)
+        {
+            try
+            {
+                var go = __instance != null ? __instance._slime : null;
+                var qs = go != null ? go.GetComponent<QuicksilverSlime>() : null;
+                if (qs != null) qs.SetSeated(false);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>Unlocks Slimepedia entries for Oca Oca, Silver Parsnip and Phase Lemon when collected.</summary>
+    [HarmonyPatch]
+    static class FoodPediaUnlockPatch
+    {
+        [HarmonyPostfix, HarmonyPatch(typeof(PediaDirector), nameof(PediaDirector.Awake))]
+        static void PostPediaAwake()
+        {
+            try { Foods.EnsurePediaDirectorLinks(); } catch { }
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(PediaDirector), nameof(PediaDirector.Unlock), typeof(IdentifiableType), typeof(bool))]
+        static void PreUnlockIdent(PediaDirector __instance, IdentifiableType __0)
+        {
+            try { if (__instance != null && __0 != null) Foods.EnsurePediaDirectorLinks(); } catch { }
+        }
+
+        static void UnlockFoodIfNeeded(IdentifiableType t)
+        {
+            if (t == null || Foods.FoodPediaEntries.Count == 0) return;
+            if (!Foods.FoodPediaEntries.TryGetValue(t.Pointer, out var entry) || entry == null) return;
+            var pd = SceneContext.Instance != null ? SceneContext.Instance.PediaDirector : null;
+            if (pd == null) return;
+            Foods.EnsurePediaDirectorLinks();
+            if (!pd.IsUnlocked(entry)) pd.Unlock(entry, true);
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem), nameof(Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.ConsumeVacuumable))]
+        static void PreVacConsume(GameObject __0)
+        {
+            try
+            {
+                if (__0 == null) return;
+                var ida = __0.GetComponent<IdentifiableActor>();
+                if (ida != null) UnlockFoodIfNeeded(ida.identType);
+            }
+            catch { }
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem), nameof(Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.StartConsuming))]
+        static void PreStartConsuming(IdentifiableType __1)
+        {
+            try { UnlockFoodIfNeeded(__1); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Classic*Gordo prefabs intentionally keep _id blank so fixed spots set their deterministic id before Awake;
+    /// when another tool (e.g. Creator Toolkit spawner) instantiates the prefab directly, assign a unique id before GameModel registration.
+    /// </summary>
+    [HarmonyPatch(typeof(GordoEat), nameof(GordoEat.Awake))]
+    static class ClassicGordoSpawnIdPatch
+    {
+        static void Prefix(GordoEat __instance)
+        {
+            try
+            {
+                if (__instance == null || !string.IsNullOrEmpty(__instance._id)) return;
+                if (__instance.GetComponentInParent<GordoSnare>() != null) return;
+                var gi = __instance.GetComponent<GordoIdentifiable>();
+                if (gi == null || !Gordos.IsClassicGordoType(gi.identType)) return;
+                __instance._id = Gordos.IdPrefix + "Spawn_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            }
+            catch { }
+        }
+    }
 }
+

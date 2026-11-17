@@ -388,10 +388,21 @@ namespace ClassicSlimes
             return c;
         }
 
+        static readonly Dictionary<string, float> _lastPlayed = new();
+
         public static void Play(SECTR_AudioCue cue, Vector3 pos)
         {
             if (cue == null) return;
             try { SECTR_AudioSystem.Play(cue, pos, false); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Play: " + e.Message); }
+        }
+
+        public static void PlayThrottled(SECTR_AudioCue cue, Vector3 pos, string key, float minInterval)
+        {
+            if (cue == null) return;
+            float now = Time.unscaledTime;
+            if (_lastPlayed.TryGetValue(key, out float prev) && now - prev < minInterval) return;
+            _lastPlayed[key] = now;
+            Play(cue, pos);
         }
 
         /// <summary>Looping positional source parented to a GameObject.</summary>
@@ -419,14 +430,14 @@ namespace ClassicSlimes
             catch { }
         }
 
-        // shared cues
-        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.55f, 25f, "radslime_aura_03");
+        // shared cues (tuned down so corrals of Rad/Mosaic largos are never overly loud)
+        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.18f, 13f, "radslime_aura_03");
         public static SECTR_AudioCue QuantumWarp => Cue("quantumWarp", false, 0.9f, 40f, "quantumslime_warp_01", "quantumslime_warp_05");
         public static SECTR_AudioCue QuantumGhost => Cue("quantumGhost", false, 0.6f, 25f, "quantumslime_idle_07");
         public static SECTR_AudioCue QuantumGhostPop => Cue("quantumGhostPop", false, 0.6f, 25f, "quantumslime_despawn_03b");
-        public static SECTR_AudioCue MosaicAura => Cue("mosaicAura", true, 0.45f, 20f, "slime_mosaic_aura_03");
-        public static SECTR_AudioCue GlintSpawn => Cue("glintSpawn", false, 0.7f, 30f, "slime_mosaic_glint_spawn_01");
-        public static SECTR_AudioCue GlintBlast => Cue("glintBlast", false, 1f, 40f, "slime_mosaic_glint_blast_03");
+        public static SECTR_AudioCue MosaicAura => Cue("mosaicAura", true, 0.14f, 11f, "slime_mosaic_aura_03");
+        public static SECTR_AudioCue GlintSpawn => Cue("glintSpawn", false, 0.24f, 16f, "slime_mosaic_glint_spawn_01");
+        public static SECTR_AudioCue GlintBlast => Cue("glintBlast", false, 0.36f, 22f, "slime_mosaic_glint_blast_03");
         public static SECTR_AudioCue QsAura => Cue("qsAura", true, 0.6f, 25f, "quicksilver_energy_aura_01");
         public static SECTR_AudioCue QsHit => Cue("qsHit", false, 1f, 30f, "quicksilver_hit_success_01", "quicksilver_hit_success_02");
         public static SECTR_AudioCue QsFizzle => Cue("qsFizzle", false, 0.8f, 25f, "quicksilver_hit_fail_01");

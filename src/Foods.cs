@@ -97,7 +97,93 @@ namespace ClassicSlimes
             }
             ClassicSlimesMod.Log.Msg($"  refreshed {n} base slime diets");
             try { FixLemonModels(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon mesh: " + e.Message); }
+            try { FixFoodRootMeshes(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("food root meshes: " + e.Message); }
             try { SetupPhaseLemon(byName); } catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon tree: " + e); }
+            try { RegisterFoodPedia(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("food pedia: " + e); }
+        }
+
+        // SR2's dormant veggieOcaoca, veggieParsnip and fruitLemon prefabs carry a dummy empty MeshFilter (sharedMesh=null)
+        // on the root GameObject above model_ocaoca / model_parsnip / model_pogofruit, causing GordoSnare.AttachBait to
+        // grab the empty root MeshFilter first and render invisible bait.
+        static void FixFoodRootMeshes()
+        {
+            foreach (var f in All)
+            {
+                var prefab = f.Type != null ? f.Type.prefab : null;
+                if (prefab == null) continue;
+                var rootMf = prefab.GetComponent<MeshFilter>();
+                if (rootMf != null && rootMf.sharedMesh == null && prefab.GetComponent<MeshRenderer>() == null)
+                {
+                    Object.DestroyImmediate(rootMf);
+                    ClassicSlimesMod.Log.Msg($"  removed empty root MeshFilter on {prefab.name} for GordoSnare visibility");
+                }
+            }
+        }
+
+        public static readonly Dictionary<IntPtr, Il2CppMonomiPark.SlimeRancher.Pedia.IdentifiablePediaEntry> FoodPediaEntries = new();
+
+        public static void RegisterFoodPedia()
+        {
+            Il2CppMonomiPark.SlimeRancher.Pedia.IdentifiablePediaEntry carrotEntry = null, pogoEntry = null;
+            foreach (var e in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Pedia.IdentifiablePediaEntry>())
+            {
+                if (e == null) continue;
+                if (e.name == "CarrotVeggie" || (e._identifiableType != null && e._identifiableType.name == "CarrotVeggie")) carrotEntry ??= e;
+                else if (e.name == "PogoFruit" || (e._identifiableType != null && e._identifiableType.name == "PogoFruit")) pogoEntry ??= e;
+            }
+            foreach (var f in All)
+            {
+                var t = f.Type;
+                if (t == null) continue;
+                var tpl = f.Fruit ? (pogoEntry ?? carrotEntry) : (carrotEntry ?? pogoEntry);
+                if (tpl == null) { ClassicSlimesMod.Log.Warning("Food pedia: no template IdentifiablePediaEntry"); return; }
+                string suffix = f.Key.StartsWith("l.") ? f.Key.Substring(2) : t.name.ToLowerInvariant();
+                var entry = Library.CreateIdentPediaEntry(
+                    t,
+                    suffix,
+                    tpl,
+                    Library.CreateLocalizedString("m.intro." + suffix, "Pedia"),
+                    Library.PediaCategoryType.Resources,
+                    Library.PediaDetail.Params(
+                        Library.PediaDetail.Create(0, Library.CreateLocalizedString("m.desc." + suffix, "Pedia"), Library.PediaDetailType.About),
+                        Library.PediaDetail.Create(1, Library.CreateLocalizedString("m.ranch." + suffix, "Pedia"), Library.PediaDetailType.HowToUse)
+                    )
+                );
+                if (entry != null)
+                {
+                    try
+                    {
+                        t._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
+                        t._requiresFullArt = false;
+                    }
+                    catch { }
+                    if (t.icon != null) PediaArt.Register(t, t.icon);
+                    FoodPediaEntries[t.Pointer] = entry;
+                    ClassicSlimesMod.Log.Msg($"  registered Slimepedia resource entry: {t.name} -> {entry.name}");
+                }
+            }
+            EnsurePediaDirectorLinks();
+        }
+
+        public static void EnsurePediaDirectorLinks()
+        {
+            if (FoodPediaEntries.Count == 0) return;
+            foreach (var pd in Resources.FindObjectsOfTypeAll<PediaDirector>())
+            {
+                if (pd == null || pd._identDict == null) continue;
+                foreach (var kv in FoodPediaEntries)
+                {
+                    var entry = kv.Value;
+                    var ident = entry != null ? entry._identifiableType : null;
+                    if (ident == null) continue;
+                    try
+                    {
+                        if (!pd._identDict.ContainsKey(ident))
+                            pd._identDict.Add(ident, entry);
+                    }
+                    catch { }
+                }
+            }
         }
 
         // ------------------------------------------------------------------ phase lemon model
@@ -180,7 +266,11 @@ namespace ClassicSlimes
             Invoke("INTERNAL_SetupLoadForIdent", refId, p);   // saves may hold phasing lemons, also after the trees are turned off
             _phase = p;
             var rc = p.prefab.GetComponent<ResourceCycle>();
-            if (rc != null) _phaseOutFx = rc.DestroyFX;
+            if (rc != null)
+            {
+                _phaseOutFx = SanitizePhaseFx(rc.DestroyFX, "PhaseLemonOutClean");
+                rc.DestroyFX = _phaseOutFx;
+            }
             FixLemon(p.prefab, false);
             // solid body = the real lemon look (PhaseLemonTree flickers it and adds a scanline shell)
             foreach (var mr in p.prefab.GetComponentsInChildren<MeshRenderer>(true))
@@ -234,7 +324,7 @@ namespace ClassicSlimes
             sc.radius = r;
             var t = go.AddComponent<PhaseLemonTree>();
             t.Sr = sr;
-            if (!_phaseInTried) { _phaseInTried = true; try { _phaseInFx = Fx.Kept("FX LemonPhaseIn"); } catch { } }
+            if (!_phaseInTried) { _phaseInTried = true; try { _phaseInFx = SanitizePhaseFx(Fx.Kept("FX LemonPhaseIn"), "PhaseLemonInClean"); } catch { } }
             PhaseTrees++;
         }
 
@@ -245,15 +335,106 @@ namespace ClassicSlimes
             Il2CppMonomiPark.SlimeRancher.DataModel.ActorModel model = null;
             try { model = sc.GameModel.InstantiateActorModel(t, group, pos, rot, false); }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"InstantiateActorModel({t.name}): {e.Message}"); }
-            if (model != null) return InstantiationHelpers.InstantiateActorFromModel(model);
+            if (model != null)
+            {
+                var go = InstantiationHelpers.InstantiateActorFromModel(model);
+                CoopCompat.AnnounceSpawn(go);
+                return go;
+            }
             return InstantiationHelpers.InstantiateActor(t.prefab, group, pos, rot, false, SlimeAppearance.AppearanceSaveSet.NONE,
                 SlimeAppearance.AppearanceSaveSet.NONE, new Il2CppSystem.Nullable<Il2CppMonomiPark.SlimeRancher.Player.AmmoSlot.AmmoMetadata>(), false, false);
         }
 
+        static Material _phaseSparkMat;
+        static Material PhaseSparkMat
+        {
+            get
+            {
+                if (_phaseSparkMat != null) return _phaseSparkMat;
+                var m = Mat.Clone("PhaseLemonSpark", "Gold Slime Sparkle");
+                if (m != null)
+                {
+                    m.Tx("_MainTex", Res.Tex("fx_star4", false, false) ?? Gfx.Generated("phaseDot", 16, 16, (x, y) =>
+                    {
+                        float dx = (x + 0.5f) / 8f - 1f, dy = (y + 0.5f) / 8f - 1f;
+                        float a = Mathf.Clamp01(1f - Mathf.Sqrt(dx * dx + dy * dy));
+                        return new Color(1f, 1f, 1f, a * a);
+                    }, false));
+                    m.Col("_TintColor", new Color(1f, 0.90f, 0.32f, 0.85f));
+                }
+                _phaseSparkMat = m;
+                return _phaseSparkMat;
+            }
+        }
+
+        static bool BrokenFxMat(Material m)
+        {
+            if (m == null) return true;
+            var sh = m.shader;
+            if (sh == null || !sh.isSupported) return true;
+            string sn = sh.name ?? "";
+            if (sn.Contains("InternalError") || sn.Contains("Error") || sn.Contains("Hidden/")) return true;
+            bool anyTexProp = false, anyValidTex = false;
+            foreach (var p in new[] { "_MainTex", "_BaseColorMap", "_UnlitColorMap", "_MainTexture", "_Tex" })
+            {
+                if (!m.HasProperty(p)) continue;
+                anyTexProp = true;
+                if (m.GetTexture(p) != null) anyValidTex = true;
+            }
+            if (anyTexProp && !anyValidTex) return true;
+            return false;
+        }
+
+        static void ScrubFxObject(GameObject root)
+        {
+            if (root == null) return;
+            var fallback = PhaseSparkMat;
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r == null) continue;
+                var psr = r.TryCast<ParticleSystemRenderer>();
+                if (psr != null && psr.trailMaterial != null && BrokenFxMat(psr.trailMaterial))
+                    psr.trailMaterial = fallback;
+                var mats = r.sharedMaterials;
+                if (mats == null || mats.Length == 0) { r.enabled = false; continue; }
+                bool changed = false, ok = true;
+                for (int i = 0; i < mats.Length; i++)
+                {
+                    if (!BrokenFxMat(mats[i])) continue;
+                    if (fallback != null) { mats[i] = fallback; changed = true; }
+                    else ok = false;
+                }
+                if (!ok) r.enabled = false;
+                else if (changed) r.sharedMaterials = mats;
+            }
+        }
+
+        static GameObject SanitizePhaseFx(GameObject src, string cleanName)
+        {
+            if (src == null) return null;
+            var copy = Fx.Kept(cleanName);
+            if (copy != null) return copy;
+            var host = new GameObject(cleanName + "_Host");
+            host.SetActive(false);
+            Object.DontDestroyOnLoad(host);
+            host.hideFlags = HideFlags.HideAndDontSave;
+            var clone = Object.Instantiate(src, host.transform);
+            clone.name = cleanName;
+            ScrubFxObject(clone);
+            return clone;
+        }
+
         static void PlayFx(GameObject fx, Vector3 pos)
         {
-            if (fx == null) return;
-            try { FXHelpers.SpawnAndPlayFX(fx, pos, Quaternion.identity); }
+            try
+            {
+                if (fx != null)
+                {
+                    var inst = FXHelpers.SpawnAndPlayFX(fx, pos, Quaternion.identity);
+                    if (inst != null) ScrubFxObject(inst);
+                }
+                else Fx.Play("FX Despawn", pos, 0.55f);
+            }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon fx: " + e.Message); }
         }
 
@@ -266,6 +447,7 @@ namespace ClassicSlimes
             var ida = go.GetComponent<IdentifiableActor>();
             var t = ida != null ? ida.identType : null;
             if (t == null || t == _lemon || t == _phase || !InGroup(Library.fruits, t)) return;
+            if (!CoopCompat.IsSpawnAuthority(tree.transform.position)) return;
             if (!tree.Handled.Add(go.Pointer)) return;
             PhaseTriggers++;
             var vac = go.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();

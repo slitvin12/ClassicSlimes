@@ -75,6 +75,31 @@ namespace ClassicSlimes
 
         void OnDestroy() => All.Remove(this);
 
+        static int _radSpeakerFrame = -1;
+        static RadSlime _radSpeaker;
+        static bool IsAudioLeader(RadSlime me)
+        {
+            if (Time.frameCount != _radSpeakerFrame)
+            {
+                _radSpeakerFrame = Time.frameCount;
+                _radSpeaker = null;
+                float best = 13f * 13f;
+                var pl = U.Player;
+                if (pl != null)
+                {
+                    var pp = pl.transform.position;
+                    for (int i = All.Count - 1; i >= 0; i--)
+                    {
+                        var r = All[i];
+                        if (r == null || !r.isActiveAndEnabled || (r._vac != null && r._vac.IsHeld())) continue;
+                        float d2 = (r.transform.position - pp).sqrMagnitude;
+                        if (d2 < best) { best = d2; _radSpeaker = r; }
+                    }
+                }
+            }
+            return _radSpeaker == me;
+        }
+
         /// <summary>Dev: switch the dome look of every live rad slime.</summary>
         public static void RestyleAll()
         {
@@ -83,7 +108,7 @@ namespace ClassicSlimes
                 if (r == null) continue;
                 if (r._aura != null) Destroy(r._aura);
                 if (r._core != null) Destroy(r._core);
-                r._aura = Visuals.MakeDome(r.transform, new Vector3(0f, 0.5f, 0f), AuraScale);
+                r._aura = Visuals.MakeDome(r.transform, new Vector3(0f, 0.5f, 0f), AuraScale, -1, r._isLargo);
                 r._core = r.MakeCore();
                 r.MakeHaze();
             }
@@ -125,6 +150,7 @@ namespace ClassicSlimes
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
         PlayerRadAbsorber _absorber;
+        bool _isLargo;
         float _factor = 1f, _nextExpand, _expandedUntil, _fallbackTick, _phase;
 
         void Start()
@@ -132,12 +158,13 @@ namespace ClassicSlimes
             _emo = GetComponent<SlimeEmotions>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
-            _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale);
+            try { var eat = GetComponent<SlimeEat>(); _isLargo = (eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo) || transform.lossyScale.x > 1.35f; } catch { }
+            _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale, -1, _isLargo);
             _core = MakeCore();
             MakeHaze();
-            // glowing green motes drifting up inside the aura
+            // glowing green motes drifting up inside the aura (toned down on largos)
             _motes = Gfx.Sparkles("RadMotes", transform, new Vector3(0f, 0.45f, 0f), Visuals.RadMoteMat,
-                new Color(0.75f, 1f, 0.40f, 1f), new Color(0.25f, 1f, 0.30f, 1f), 16f, 2.2f, 0.07f, 0.18f, 2.3f, 48, 0.16f);
+                new Color(0.75f, 1f, 0.40f, 1f), new Color(0.25f, 1f, 0.30f, 1f), _isLargo ? 5f : 14f, 2.2f, 0.07f, 0.16f, 2.3f, _isLargo ? 18 : 40, 0.16f);
             if (_motes != null) { try { var mm = _motes.main; mm.gravityModifierMultiplier = -0.05f; } catch { } }
             _phase = U.Rand(0f, 10f);
             All.Add(this);
@@ -209,7 +236,7 @@ namespace ClassicSlimes
                 if (show) _core.transform.localScale = Vector3.one * (AuraScale * CoreRatio * Mathf.Max(_factor, 0.4f) * pulse);
             }
             Gfx.SetEmitting(_motes, show);
-            Snd.SetPlaying(_loop, show);
+            Snd.SetPlaying(_loop, show && IsAudioLeader(this));
 
             if (!show || !Cfg.RadAuraDamagesPlayer.Value) return;
             // AuraScale is the DIAMETER of the (unit-diameter) aura sphere: irradiate only inside what is drawn
@@ -317,7 +344,7 @@ namespace ClassicSlimes
             if (Time.time >= _nextTeleport)
             {
                 _nextTeleport = Time.time + TeleportDelay();
-                if (U.Agitation(_emo) > 0.1f && _ghosts.Count > 0)
+                if ((!CoopCompat.IsCoop || CoopCompat.IsLocallySimulated(_rb)) && U.Agitation(_emo) > 0.1f && _ghosts.Count > 0)
                 {
                     var target = ReachableGhost();
                     if (target != null) TeleportTo(target);
@@ -682,7 +709,7 @@ namespace ClassicSlimes
             if (_ignored.Count == 0) { _lastClear = transform.position; _hasClear = true; return; }
             // fed while still inside a wall: it does not finish the pass, it steps back to the side it came from
             // (held by the vacuum -> the vacuum pulls it out; the walls come back once it is out, as before)
-            if (InsideIgnoredWall() && (held || !StepBackOutOfWall())) return;
+            if (InsideIgnoredWall() && (held || (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) || !StepBackOutOfWall())) return;
             RestoreWalls();
             DropGhostsBeyondWalls();
         }
@@ -830,11 +857,39 @@ namespace ClassicSlimes
         public MosaicSlime(IntPtr ptr) : base(ptr) { }
 
         const int MaxGlints = 3;
+        public static readonly List<MosaicSlime> All = new();
+        static int _mosaicSpeakerFrame = -1;
+        static MosaicSlime _mosaicSpeaker;
+        static bool IsAudioLeader(MosaicSlime me)
+        {
+            if (Time.frameCount != _mosaicSpeakerFrame)
+            {
+                _mosaicSpeakerFrame = Time.frameCount;
+                _mosaicSpeaker = null;
+                float best = 11f * 11f;
+                var pl = U.Player;
+                if (pl != null)
+                {
+                    var pp = pl.transform.position;
+                    for (int i = All.Count - 1; i >= 0; i--)
+                    {
+                        var m = All[i];
+                        if (m == null || !m.isActiveAndEnabled || (m._vac != null && m._vac.IsHeld())) continue;
+                        float d2 = (m.transform.position - pp).sqrMagnitude;
+                        if (d2 < best) { best = d2; _mosaicSpeaker = m; }
+                    }
+                }
+            }
+            return _mosaicSpeaker == me;
+        }
+
         readonly List<MosaicGlint> _glints = new();
         SlimeEmotions _emo;
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
+        Rigidbody _rb;
         SECTR_PointSource _loop;
+        bool _isLargo;
         double _nextGlint;
         float _nextPull, _nextFlare;
         ParticleSystem _stars;
@@ -847,18 +902,21 @@ namespace ClassicSlimes
             _emo = GetComponent<SlimeEmotions>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
+            _rb = GetComponent<Rigidbody>();
+            try { var eat = GetComponent<SlimeEat>(); _isLargo = (eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo) || transform.lossyScale.x > 1.35f; } catch { }
+            All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.MosaicAura);
-            // SR1 look: white four-point stars twinkling on the glass + occasional bright glint flares
-            _stars = Gfx.Sparkles("MosaicStars", transform, new Vector3(0f, 0.55f, 0f), Visuals.StarMat, Color.white, new Color(0.7f, 0.9f, 1f, 1f), 2.6f, 0.75f, 0.22f, 0.5f, 0.5f, 8);
+            // SR1 look: white four-point stars twinkling on the glass + occasional glint flares (gentler on largos)
+            _stars = Gfx.Sparkles("MosaicStars", transform, new Vector3(0f, 0.55f, 0f), Visuals.StarMat, Color.white, new Color(0.7f, 0.9f, 1f, 1f), _isLargo ? 0.9f : 2.2f, 0.75f, 0.20f, _isLargo ? 0.34f : 0.46f, 0.5f, _isLargo ? 4 : 8);
             for (int i = 0; i < _flares.Length; i++)
             {
                 _flares[i] = Gfx.Billboard("MosaicFlare", transform, Visuals.FlareMat, Vector3.zero, 0f);
                 _flares[i].SetActive(false);
                 var bb = _flares[i].GetComponent<Billboard>(); if (bb != null) bb.Spin = i == 0 ? 60f : -45f;
             }
-            _nextFlare = Time.time + U.Rand(0.3f, 1.5f);
+            _nextFlare = Time.time + U.Rand(0.8f, 2.8f);
             var td = SceneContext.Instance != null ? SceneContext.Instance.TimeDirector : null;
-            if (td != null) _nextGlint = td.HoursFromNow(U.Rand(0.05f, 0.4f));
+            if (td != null) _nextGlint = td.HoursFromNow(U.Rand(0.15f, 0.7f));
         }
 
         void Flares(bool show)
@@ -866,13 +924,13 @@ namespace ClassicSlimes
             float now = Time.time;
             if (show && now > _nextFlare)
             {
-                _nextFlare = now + U.Rand(0.7f, 2.4f);
+                _nextFlare = now + (_isLargo ? U.Rand(2.8f, 6.5f) : U.Rand(1.0f, 2.8f));
                 for (int i = 0; i < _flares.Length; i++)
                 {
                     if (_flares[i] == null || _flareT[i] >= 0f) continue;
                     var d = UnityEngine.Random.onUnitSphere; d.y = Mathf.Abs(d.y) * 0.8f + 0.1f;
                     _flares[i].transform.localPosition = new Vector3(0f, 0.5f, 0f) + d.normalized * 0.52f;
-                    _flareT[i] = 0f; _flareSize[i] = U.Rand(0.55f, 1.0f);
+                    _flareT[i] = 0f; _flareSize[i] = _isLargo ? U.Rand(0.32f, 0.55f) : U.Rand(0.50f, 0.85f);
                     _flares[i].SetActive(true);
                     break;
                 }
@@ -894,15 +952,16 @@ namespace ClassicSlimes
             bool held = _vac != null && _vac.IsHeld();
             Gfx.SetEmitting(_stars, !held);
             Flares(!held);
-            Snd.SetPlaying(_loop, day && !held);
-            if (day && !held && Time.time > _nextPull) { _nextPull = Time.time + 1.5f; PullSlimes(); }
-            if (!Cfg.MosaicGlints.Value || held) return;
+            Snd.SetPlaying(_loop, day && !held && IsAudioLeader(this));
+            bool sim = !CoopCompat.IsCoop || CoopCompat.IsLocallySimulated(_rb);
+            if (sim && day && !held && Time.time > _nextPull) { _nextPull = Time.time + 1.5f; PullSlimes(); }
+            if (!sim || !Cfg.MosaicGlints.Value || held) return;
             var td = SceneContext.Instance != null ? SceneContext.Instance.TimeDirector : null;
             if (td == null || !td.HasReached(_nextGlint)) return;
             float agit = U.Agitation(_emo);
-            _nextGlint = td.HoursFromNow(0.5f * (1f - 0.8f * agit));
+            _nextGlint = td.HoursFromNow((_isLargo ? 1.35f : 0.65f) * (1f - 0.75f * agit));
             bool calmed = _calm != null && _calm.IsCalmed();
-            if (day && !calmed && _glints.Count < MaxGlints) SpawnGlint(Mathf.Lerp(7.5f, 30f, agit) * 0.5f);
+            if (day && !calmed && _glints.Count < (_isLargo ? 1 : MaxGlints)) SpawnGlint(Mathf.Lerp(7.5f, 30f, agit) * 0.5f);
         }
 
         public void SpawnGlint(float radius)
@@ -913,7 +972,7 @@ namespace ClassicSlimes
                 var p = transform.position + new Vector3(Mathf.Cos(a) * r, U.Rand(2.5f, 4.5f), Mathf.Sin(a) * r);
                 if (Physics.Linecast(transform.position + Vector3.up, p, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
                 var g = Visuals.MakeGlint(this, p);
-                if (g != null) { _glints.Add(g); Snd.Play(Snd.GlintSpawn, p); }
+                if (g != null) { _glints.Add(g); Snd.PlayThrottled(Snd.GlintSpawn, p, "glintSpawn", 4.5f); }
                 return;
             }
         }
@@ -925,7 +984,7 @@ namespace ClassicSlimes
             foreach (var c in cols)
             {
                 var rb = c != null ? c.attachedRigidbody : null;
-                if (rb == null || rb.gameObject == gameObject || !seen.Add(rb.Pointer)) continue;
+                if (rb == null || rb.isKinematic || rb.gameObject == gameObject || !seen.Add(rb.Pointer)) continue;
                 if (rb.GetComponent<SlimeEat>() == null || rb.GetComponent<MosaicSlime>() != null) continue;
                 var v = rb.GetComponent<Vacuumable>();
                 if (v != null && v.IsHeld()) continue;
@@ -996,6 +1055,7 @@ namespace ClassicSlimes
 
         void OnDestroy()
         {
+            All.Remove(this);
             if (_glass != null) { _glass.Dispose(); _glass = null; }
             foreach (var g in _glints) if (g != null) Object.Destroy(g.gameObject);
             _glints.Clear();
@@ -1053,7 +1113,7 @@ namespace ClassicSlimes
         {
             var p = transform.position;
             Fx.Play("FX FireSlimeDeath", p);
-            Snd.Play(Snd.GlintBlast, p);
+            Snd.PlayThrottled(Snd.GlintBlast, p, "glintBlast", 2.5f);
             int ignited = 0; bool hitPlayer = false;
             if (Cfg.MosaicGlintFire.Value)
             {
@@ -1122,6 +1182,26 @@ namespace ClassicSlimes
         public static float FleeRadius = 12f, ResistTime = 1.4f, TiredTime = 2.8f, ClimbHeight = 5f, ClimbSpeed = 7.5f;
         /// <summary>Dev: pretend the vacpack is sucking along the camera's view until then.</summary>
         public static float DevAimUntil;
+
+        bool _seated;
+        float _seatGraceUntil;
+        public bool IsSeated => _seated || Time.time < _seatGraceUntil || GetComponent<SafeJointReference>() != null || GetComponent<Joint>() != null;
+        public void SetSeated(bool on)
+        {
+            _seated = on;
+            if (on)
+            {
+                _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _zigAt = -1f;
+                SetNoForces(false);
+                if (_rb != null && !_rb.isKinematic) _rb.linearVelocity = Vector3.zero;
+            }
+        }
+        public void EnterSeatGrace(float sec = 0.8f)
+        {
+            _seatGraceUntil = Time.time + sec;
+            _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _zigAt = -1f;
+            SetNoForces(false);
+        }
 
         public bool Charged => Time.time < _chargedUntil;
         public bool Tired => Time.time < _tiredUntil;
@@ -1282,6 +1362,14 @@ namespace ClassicSlimes
         /// </summary>
         void FixedUpdate()
         {
+            if (IsSeated)
+            {
+                SetNoForces(false);
+                _climbUntil = 0f;
+                _fleeUntil = 0f;
+                _boostUntil = 0f;
+                return;
+            }
             if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())))
             {
                 SetNoForces(false);
@@ -1301,10 +1389,10 @@ namespace ClassicSlimes
             if (tired && aimed) return;   // worn out: the vacuum gets it
             if (!_homeSet || (pos - _home).sqrMagnitude > 60f * 60f) { _home = pos; _homeSet = true; }   // carried somewhere new
             if (now > _nextTurn) { _nextTurn = now + U.Rand(0.7f, 1.8f); _turnRate = U.Rand(-95f, 95f) * (charged ? 1.6f : 1f); }
-            var pl = U.Player;
+            var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
             var away = Vector3.zero;
             float plDist = float.MaxValue;
-            if (pl != null) { away = pos - pl.transform.position; away.y = 0f; plDist = away.magnitude; }
+            if (pl != null) { away = pos - nearPlPos; away.y = 0f; plDist = away.magnitude; }
             if (!tired && pl != null && (aimed || plDist < FleeRadius * (charged ? 0.6f : 1f))) _fleeUntil = now + 1.5f;
             bool fleeing = !tired && now < _fleeUntil;
             float? target = null;
@@ -1449,7 +1537,8 @@ namespace ClassicSlimes
         void Update()
         {
             float now = Time.time;
-            bool held = _vac != null && _vac.IsHeld();
+            bool seated = IsSeated;
+            bool held = (_vac != null && _vac.IsHeld()) || seated;
             bool charged = Charged;
             float left = _chargedUntil - now;
             // the charge flickers out over its last two seconds
@@ -1844,7 +1933,7 @@ namespace ClassicSlimes
                 // falling apart in the vacuum: constant tearing and a pixel spray until it is debugged
                 TriggerBurst(0.1f);
                 if (now > _nextHeldFx) { _nextHeldFx = now + 0.07f; if (_burst != null) _burst.Emit(2); }
-                if (_heldTime > 1.2f && !_debugged) Debug();
+                if (_heldTime > 1.2f && !_debugged && CoopCompat.IsHeldByLocalVac(_vac)) Debug();
                 return;
             }
             _heldTime = 0f;
@@ -1870,7 +1959,7 @@ namespace ClassicSlimes
             else UpdateDisguise(now);
             if (_disguised || calm) return;
             // jittery with the rancher close by: extra little bursts
-            float dp = U.DistToPlayer(transform.position + Vector3.up * 0.5f);
+            float dp = CoopCompat.DistToNearestPlayer(transform.position + Vector3.up * 0.5f);
             if (dp < 5f && now > _nextJitter)
             {
                 _nextJitter = now + U.Rand(0.8f, 2.2f);
@@ -1889,7 +1978,7 @@ namespace ClassicSlimes
             else if (now > _nextFlicker)
             {
                 // the true form shows through now and then - much more often with the rancher close by
-                bool near = U.DistToPlayer(transform.position + Vector3.up * 0.5f) < 5f;
+                bool near = CoopCompat.DistToNearestPlayer(transform.position + Vector3.up * 0.5f) < 5f;
                 _nextFlicker = now + (near ? U.Rand(0.8f, 2.5f) : U.Rand(3f, 9f));
                 _flickerEnd = now + (near ? U.Rand(0.12f, 0.25f) : 0.12f);
                 Apply(_own);
@@ -1962,8 +2051,8 @@ namespace ClassicSlimes
             if (_rb == null || _rb.isKinematic) return;
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
             var pos = transform.position;
-            var pl = U.Player;
-            var away = pl != null ? pos - pl.transform.position : transform.forward;
+            var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
+            var away = pl != null ? pos - nearPlPos : transform.forward;
             away.y = 0f;
             float dist = away.magnitude;
             if (pl != null && dist > 32f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }   // got away

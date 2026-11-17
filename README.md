@@ -4,6 +4,10 @@
 **Mosaic (мозаичный)**, **Quicksilver (ртутный)** и **Glitch (глитч)**. Ресурсы извлечены из файлов SR1
 (иконки, меши, текстуры, звуки, тексты EN/RU), механики заново реализованы по поведению SR1.
 
+> *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.x co-op support.
+
+**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.5 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
+
 ## Установка
 Нужны только **Slime Rancher 2** и **MelonLoader 0.7+**. **Slime Rancher 1 не нужен:** модели, текстуры, звуки и
 тексты SR1 один раз извлечены при разработке (скрипты в `tools/`) и встроены в `ClassicSlimes.dll` — мод не ищет
@@ -16,12 +20,31 @@
    `CottonLibrary.dll` одновременно нельзя). CottonForge — прямая замена: другие Cotton-моды работают без пересборки.
 3. Скачать `ClassicSlimes.dll` из [релиза](https://github.com/slitvin12/ClassicSlimes/releases/latest) и положить
    туда же. Итог: `Mods\CottonLibrary.dll` + `Mods\ClassicSlimes.dll`.
-4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.4`.
+4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.5`.
    Первый показ главного меню на ~10 с дольше обычного — генерируются ларго.
 
 Версии 1.2.x–1.3.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
 должен запускаться без этих стилей, но такая связка в 1.2.x–1.3.x не проверялась.
 Удаление — убрать `ClassicSlimes.dll`; слаймы и ларго мода при этом пропадут из сохранения (см. «Известные проблемы»).
+
+## Новое в 1.3.5
+
+- **Кооператив Lycoreia 2.x (и SR2MP).** Реализован рефлексивный мост `CoopCompat` без жёсткой зависимости от `Lycoreia.dll` / `Starlight.dll`:
+  - сбитые фазовые лимоны и акторы еды анонсируются в сеть (`CoopCompat.AnnounceSpawn`) и обрабатываются только лидером зоны (`IsSpawnAuthority`), чтобы не плодить дубли и не стирать чужие плоды у гостя;
+  - телепорты / выход из стен `Quantum` и притяжение / блики `Mosaic` выполняются только на стороне владельца физики актора (`IsLocallySimulated`);
+  - `Quicksilver` и `Glitch` выбирают ближайшего игрока среди локального и активных удалённых аватаров (`NearestPlayer`);
+  - награда за отладку `Glitch` выдаётся только при всасывании локальным вакпаком (`IsHeldByLocalVac`), исключая двойное начисление от репликации;
+  - уже лопнувшие гордо деактивируются по `ALREADY_BURST_FLAG` при входе гостя в зону, а прямой спавн префаба классического гордо получает уникальный ID до регистрации в `GameModel` (`ClassicGordoSpawnIdPatch`).
+- **Еда SR1 в Слаймопедии и ловушках Гордо.** Добавлены статьи Слаймопедии для Ока-оки, Серебряного пастернака и Фазового лимона (открываются при сборе вакпаком); исправлено отображение всех трёх продуктов как приманки на ловушке Гордо (`GordoSnare`).
+- **Ртутный слайм на декоре.** `Quicksilver` спокойно сидит на скамейках, стульях, диванах и Сцене слайма №1 (`SlimeAttachPoint`), не срывая крепление своими рывками.
+- **Графика и совместимость со SlimeFPS / Creator Toolkit.** Обновлены иконки и арт Слаймопедии для всех 5 классических слаймов, уточнены блики и раздельное эластичное стекло для обычного Mosaic и ларго; процедурные сканлайны голограмм и фазовых лимонов защищены через `ignoreMipmapLimit` от размытия при снижении качества текстур.
+
+## Совместимость с другими модами
+
+- **Lycoreia 2.x (кооп SR2):** поддерживается кооперативная синхронизация слаймов, еды и гордо (мод должен быть установлен у всех участников сессии).
+- **[Creator Toolkit](https://github.com/slitvin12/SR2-CreatorToolkit) (0.9.1+) и [SlimeMap](https://github.com/slitvin12/SlimeMap) (1.1.1+):** классические гордо (`Rad`, `Quantum`, `Mosaic`) отображаются на карте и в трекере с собственными иконками, а у ларго на компасе показывается иконка базового слайма.
+- **[SlimeFPS](https://github.com/slitvin12/SlimeFPS) (1.1.1+):** частицы и ауры классических слаймов защищены от урезания в пресетах оптимизации, а сканлайны не теряют чёткость при снижении мип-уровней текстур.
+- **ChknnRancherMod:** несовместим с диким спавном слаймов — заменяет все наборы спавнеров на кур (подробнее в «Известные проблемы»).
 
 ## Что добавлено
 | Слайм | Где появляется | Механика (как в SR1) | Ларго / плорт |
@@ -308,7 +331,7 @@ dotnet build -c Release -p:Deploy=true -p:SR2Dir="D:\SteamLibrary\steamapps\comm
   Mosaic и поверхность Rad-ларго), `LargoLook.cs` (стили форка и эталонные рецепты SR1), `Faces.cs` (клоны лиц SR2 и их защита),
   `Gfx.cs` (процедурные меши, текстуры и частицы), `Foods.cs` (еда SR1, дикие места, лимонные деревья), `Gordos.cs` (гордо SR1: типы, места, награды), `GordoDiag.cs` (dev-проверки мест гордо), `RadHud.cs` (шкала облучения),
   `Behaviours.cs` (механики), `Jelly.cs` (пружинящее «желе» слаймов со стеклом), `ElasticGlass.cs` (эластичное стекло Mosaic),
-  `GordoFacets.cs` / `SlimeFacets.cs` (гранёная оболочка SR1 у Mosaic-гордо / Mosaic-слаймов и ларго), `Hooks.cs` (Harmony: вода, еда, защита материалов лиц), `SaveGuard.cs`,
+  `GordoFacets.cs` / `SlimeFacets.cs` (гранёная оболочка SR1 у Mosaic-гордо / Mosaic-слаймов и ларго), `CoopCompat.cs` (рефлексивная интеграция с Lycoreia 2.x и SR2MP), `Hooks.cs` (Harmony: вода, еда, ловушки гордо, скамейки, спавн-ID гордо, защита материалов лиц), `SaveGuard.cs`,
   `Pedia.cs` (арт слаймопедии), `Market.cs` (табло рынка), `PediaShot.cs` (снимки для слаймопедии), `DevCmd.cs`, `DevSpawn.cs`, `Experiments.cs` (эксперименты с материалами, объёмная спираль
   квантового), `Swirl.cs` (нарисованная спираль), `Diag.cs`/`DiagX.cs`, `Cfg.cs`, `Util.cs`, `Res.cs`;
   `src/Assets/` — ресурсы, встраиваемые в DLL.

@@ -213,6 +213,7 @@ namespace ClassicSlimes
             t.Apply(true);
             t.filterMode = filter;
             t.wrapMode = TextureWrapMode.Repeat;
+            try { t.ignoreMipmapLimit = true; } catch { }
             _gen[key] = Keep(t);
             return t;
         }
