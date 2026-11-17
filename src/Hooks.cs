@@ -159,20 +159,13 @@ namespace ClassicSlimes
         }
     }
 
-    /// <summary>Quicksilver (and panicking Glitch) slimes never hop: SR2's random hopping is skipped while their ground-runner drives them.</summary>
+    /// <summary>Quicksilver slimes never hop: SR2's random hopping is skipped (QuicksilverSlime's runner drives them).</summary>
     [HarmonyPatch(typeof(SlimeRandomMove), nameof(SlimeRandomMove.Action))]
     static class QsNoHopMove
     {
         static bool Prefix(SlimeRandomMove __instance)
         {
-            try
-            {
-                if (Cfg.QuicksilverRuns.Value && QuicksilverSlime.NoHop.Count > 0 && QuicksilverSlime.NoHop.ContainsKey(__instance.Pointer))
-                    return false;
-                if (GlitchSlime.FleeNoHop.TryGetValue(__instance.Pointer, out var gs) && gs != null && gs.Fleeing)
-                    return false;
-                return true;
-            }
+            try { return !Cfg.QuicksilverRuns.Value || QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.ContainsKey(__instance.Pointer); }
             catch { return true; }
         }
     }
@@ -185,8 +178,6 @@ namespace ClassicSlimes
         {
             try
             {
-                if (GlitchSlime.FleeNoHop.TryGetValue(__instance.Pointer, out var gs) && gs != null && gs.Fleeing)
-                    return false;
                 if (!Cfg.QuicksilverRuns.Value || QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.TryGetValue(__instance.Pointer, out var qs) || qs == null) return true;
                 var t = __instance._target;
                 if (t != null) qs.RunTo(t.transform.position);

@@ -1382,12 +1382,13 @@ namespace ClassicSlimes
         Vector3 _home, _goal;
         bool _homeSet;
         // chased: it outruns the rancher, jinks out of the vacuum cone and resists the vacuum until it tires out
-        // (it has to be kept in the cone for a while), runs up walls and ledges and drops down when it has to
+        // (it has to be kept in the cone for a while), skirting boulders/cliffs and hugging hills without launching
         float _stamina = 1f, _tiredUntil, _jinkSide = 1f, _nextJink, _climbUntil, _nextClimbRoll, _fleeUntil, _fledAt = -100f;
-        Vector3 _climbTop, _climbDir;
+        float _avoidUntil, _avoidLockUntil, _avoidSide = 1f;
+        Vector3 _climbTop, _climbDir, _avoidDir;
         bool _noForces, _wasTired;
-        public static float RunSpeed = 9f, ChargedSpeed = 13f, FleeSpeed = 13f, MaxSpeed = 24f, Grip = 34f, FleeGrip = 55f, TetherRadius = 40f;
-        public static float FleeRadius = 12f, ResistTime = 1.4f, TiredTime = 2.8f, ClimbHeight = 5f, ClimbSpeed = 7.5f;
+        public static float RunSpeed = 9.5f, ChargedSpeed = 13.5f, FleeSpeed = 16.5f, MaxSpeed = 26f, Grip = 38f, FleeGrip = 68f, TetherRadius = 40f;
+        public static float FleeRadius = 14f, ResistTime = 1.4f, TiredTime = 2.8f, ClimbHeight = 1.8f, ClimbSpeed = 6.5f;
         /// <summary>Dev: pretend the vacpack is sucking along the camera's view until then.</summary>
         public static float DevAimUntil;
 
@@ -1416,7 +1417,7 @@ namespace ClassicSlimes
             _seated = on;
             if (on)
             {
-                _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _zigAt = -1f;
+                _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _avoidUntil = 0f; _avoidLockUntil = 0f; _zigAt = -1f;
                 SetNoForces(false);
                 if (_rb != null && !_rb.isKinematic) _rb.linearVelocity = Vector3.zero;
             }
@@ -1424,7 +1425,7 @@ namespace ClassicSlimes
         public void EnterSeatGrace(float sec = 0.2f)
         {
             _seatGraceUntil = Time.time + sec;
-            _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _zigAt = -1f;
+            _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _avoidUntil = 0f; _avoidLockUntil = 0f; _zigAt = -1f;
             SetNoForces(false);
         }
 
@@ -1484,19 +1485,54 @@ namespace ClassicSlimes
             }
         }
 
+        static readonly float[] FleeAngles = { 25f, 45f, 68f, 92f, 120f, 150f };
+        static readonly float[] RoamAngles = { 35f, 65f, 100f, 140f, 175f };
+
         /// <summary>
-        /// What is ahead in that direction (look-ahead grows with speed): a wall, a drop it shouldn't take (deeper than
-        /// maxDrop body sizes, water, the void) or clear ground.
+        /// 2-step terrain-following probe: follows walkable hills up to ~39 deg without dipping under terrain,
+        /// treats steep rock faces/boulders (>42 deg or sharp step-ups) as Wall, and cliffs/deep water as Drop.
         /// </summary>
-        static Ahead Look(Vector3 pos, Vector3 dir, float s, float speed, float maxDrop, out RaycastHit wall)
+        static Ahead Look(Vector3 pos, float baseY, Vector3 dir, float s, float speed, float maxDrop, out RaycastHit wall)
         {
-            float look = (0.9f + speed * 0.13f) * s;
-            var o = pos + Vector3.up * (0.5f * s);
-            if (Physics.SphereCast(o, 0.25f * s, dir, out wall, look, U.GroundMask, QueryTriggerInteraction.Ignore) && wall.normal.y < 0.55f) return Ahead.Wall;
-            var p = o + dir * look;
-            if (!Physics.Raycast(p, Vector3.down, out var g, maxDrop * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return Ahead.Drop;
-            if (Physics.Raycast(p, Vector3.down, out var wHit, g.distance, WaterMask, QueryTriggerInteraction.Collide) && (g.distance - wHit.distance > 0.65f * s))
-                return Ahead.Drop;   // deep water before the ground; wade through shallow puddles
+            wall = default;
+            float look = Mathf.Clamp((0.95f + speed * 0.11f) * s, 1.3f * s, 3.6f * s);
+            float stepLen = 0.5f * look;
+            float curY = baseY;
+            var prevXZ = new Vector3(pos.x, 0f, pos.z);
+            for (int step = 1; step <= 2; step++)
+            {
+                var nextXZ = new Vector3(pos.x, 0f, pos.z) + dir * (stepLen * step);
+                var chestFrom = new Vector3(prevXZ.x, curY + 0.46f * s, prevXZ.z);
+                if (Physics.SphereCast(chestFrom, 0.24f * s, dir, out var hit, stepLen, U.GroundMask, QueryTriggerInteraction.Ignore))
+                {
+                    if (hit.normal.y < 0.74f) { wall = hit; return Ahead.Wall; }
+                }
+                float maxRise = stepLen * 0.82f + 0.35f * s;
+                var pTop = new Vector3(nextXZ.x, curY + maxRise + 0.45f * s, nextXZ.z);
+                var toTop = pTop - chestFrom;
+                float toTopLen = toTop.magnitude;
+                if (toTopLen > 1e-3f && Physics.Raycast(chestFrom, toTop / toTopLen, out var ceilHit, toTopLen, U.GroundMask, QueryTriggerInteraction.Ignore))
+                {
+                    if (ceilHit.normal.y >= -0.2f && ceilHit.normal.y < 0.74f) { wall = ceilHit; return Ahead.Wall; }
+                    if (ceilHit.normal.y < -0.2f) pTop.y = Mathf.Max(curY + 0.55f * s, ceilHit.point.y - 0.12f * s);
+                }
+                float castDown = Mathf.Max(0.8f * s, (pTop.y - curY) + maxDrop * s);
+                if (!Physics.Raycast(pTop, Vector3.down, out var g, castDown, U.GroundMask, QueryTriggerInteraction.Ignore))
+                    return Ahead.Drop;
+                if (g.point.y - curY > stepLen * 0.85f + 0.38f * s) { wall = g; return Ahead.Wall; }
+                if (g.point.y > curY + 0.12f * s && g.normal.y < 0.74f) { wall = g; return Ahead.Wall; }
+                if (g.point.y <= curY + 0.12f * s && g.normal.y < 0.52f) return Ahead.Drop;
+                if (Physics.Raycast(pTop, Vector3.down, out var wHit, g.distance, WaterMask, QueryTriggerInteraction.Collide)
+                    && (g.distance - wHit.distance > 0.60f * s))
+                    return Ahead.Drop;
+                if (Physics.CheckSphere(g.point + Vector3.up * (0.52f * s), 0.22f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
+                {
+                    wall = g;
+                    return Ahead.Wall;
+                }
+                curY = g.point.y;
+                prevXZ = nextXZ;
+            }
             return Ahead.Clear;
         }
 
@@ -1587,9 +1623,9 @@ namespace ClassicSlimes
         }
 
         /// <summary>
-        /// The runner: long sweeping curves at speed (charged: faster, tighter), swerving from walls and drops, back
-        /// towards home when it strays, short pauses now and then. Chased (rancher close or the vacpack on it): flees
-        /// faster than the rancher runs, jinking across the suction cone; walls with a reachable top get climbed.
+        /// The runner: long sweeping curves at speed (charged: faster, tighter), swerving smoothly around boulders and drops,
+        /// hugging hills and crests without launching into the air. Chased: outruns the rancher, jinks across clear corridors,
+        /// and only climbs low flat ledges as a last resort when boxed in.
         /// </summary>
         void FixedUpdate()
         {
@@ -1599,9 +1635,11 @@ namespace ClassicSlimes
                 _climbUntil = 0f;
                 _fleeUntil = 0f;
                 _boostUntil = 0f;
+                _avoidUntil = 0f;
+                _avoidLockUntil = 0f;
                 return;
             }
-            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())))
+            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) || (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())))
             {
                 SetNoForces(false);
                 _climbUntil = 0f;
@@ -1616,31 +1654,120 @@ namespace ClassicSlimes
             Stamina(now, dt, aimed, charged);
             bool tired = now < _tiredUntil;
             if (now < _climbUntil) { Climb(pos, s, charged); return; }
-            if (!U.Grounded(transform, s)) return;
             if (tired && aimed) return;   // worn out: the vacuum gets it
+
+            bool hasGround = Physics.Raycast(pos + Vector3.up * (0.45f * s), Vector3.down, out var gndHit, 1.35f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
+            float baseY = hasGround ? gndHit.point.y : pos.y - 0.50f * s;
+            float clearance = (pos.y - 0.50f * s) - baseY;
+            if (!hasGround || clearance > 0.42f * s)
+            {
+                var airV = _rb.linearVelocity;
+                if (airV.y > 0.35f)
+                {
+                    airV.y = Mathf.MoveTowards(airV.y, 0.15f, 32f * dt);
+                    _rb.linearVelocity = airV;
+                }
+                _rb.AddForce(Vector3.down * 18f, ForceMode.Acceleration);
+                return;
+            }
+
             if (!_homeSet || (pos - _home).sqrMagnitude > 60f * 60f) { _home = pos; _homeSet = true; }   // carried somewhere new
             if (now > _nextTurn) { _nextTurn = now + U.Rand(0.7f, 1.8f); _turnRate = U.Rand(-95f, 95f) * (charged ? 1.6f : 1f); }
             var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
             var away = Vector3.zero;
             float plDist = float.MaxValue;
             if (pl != null) { away = pos - nearPlPos; away.y = 0f; plDist = away.magnitude; }
-            if (!tired && pl != null && (aimed || plDist < FleeRadius * (charged ? 0.6f : 1f))) _fleeUntil = now + 1.5f;
+            if (!tired && pl != null && (aimed || plDist < FleeRadius * (charged ? 0.85f : 1f)))
+            {
+                _fleeUntil = Mathf.Max(_fleeUntil, now + 1.8f);
+                _pauseUntil = 0f;
+                _zigAt = -1f;
+            }
             bool fleeing = !tired && now < _fleeUntil;
+            float maxDrop = fleeing ? 3.5f : pos.y > _home.y + 1.5f ? 5f : 2.1f;
+
             float? target = null;
             float speed;
             if (fleeing)
             {
                 _fledAt = now;
-                var run = plDist > 0.01f ? away / plDist : transform.forward;
+                speed = Mathf.Min(Mathf.Max(FleeSpeed, _plSpeed * 1.35f + 4.0f) * (charged ? 1.22f : 1f), MaxSpeed * (charged ? 1.18f : 1f));
+                var awayDir = plDist > 0.01f ? away / plDist : transform.forward;
+                var idealDir = awayDir;
                 if (aimed)
                 {
-                    // jink across the suction cone, switching sides now and then
-                    if (now > _nextJink) { _nextJink = now + U.Rand(0.35f, 0.8f); if (U.Rng.NextDouble() < 0.55) _jinkSide = -_jinkSide; }
+                    // jink across the suction cone, choosing a clear side before flipping
+                    if (now > _nextJink) { _nextJink = now + U.Rand(0.35f, 0.75f); if (U.Rng.NextDouble() < 0.55) _jinkSide = -_jinkSide; }
                     var side = Vector3.Cross(Vector3.up, _vacFwd); side.y = 0f;
-                    if (side.sqrMagnitude > 1e-4f) run = (side.normalized * (1.4f * _jinkSide) + run).normalized;
+                    if (side.sqrMagnitude > 1e-4f)
+                    {
+                        var sn = side.normalized;
+                        var cand1 = (sn * (0.95f * _jinkSide) + awayDir).normalized;
+                        if (Look(pos, baseY, cand1, s, speed, maxDrop, out _) == Ahead.Clear)
+                            idealDir = cand1;
+                        else
+                        {
+                            var cand2 = (sn * (-0.95f * _jinkSide) + awayDir).normalized;
+                            if (Look(pos, baseY, cand2, s, speed, maxDrop, out _) == Ahead.Clear)
+                            {
+                                _jinkSide = -_jinkSide;
+                                idealDir = cand2;
+                            }
+                        }
+                    }
                 }
-                target = YawOf(run);
-                speed = Mathf.Min(Mathf.Max(FleeSpeed, _plSpeed * 1.25f + 2.5f) * (charged ? 1.2f : 1f), MaxSpeed * (charged ? 1.15f : 1f));
+
+                Vector3 chosenDir = idealDir;
+                bool keepAvoid = now < _avoidUntil && _avoidDir.sqrMagnitude > 0.25f
+                    && Look(pos, baseY, _avoidDir, s, speed, maxDrop, out _) == Ahead.Clear;
+                if (keepAvoid && (now < _avoidLockUntil || Look(pos, baseY, idealDir, s, speed, maxDrop, out _) != Ahead.Clear))
+                {
+                    chosenDir = _avoidDir;
+                }
+                else
+                {
+                    var idealAhead = Look(pos, baseY, idealDir, s, speed, maxDrop, out var blockHit);
+                    if (idealAhead == Ahead.Clear)
+                    {
+                        _avoidUntil = 0f;
+                        chosenDir = idealDir;
+                    }
+                    else
+                    {
+                        bool found = false;
+                        foreach (float ang in FleeAngles)
+                        {
+                            foreach (float sign in new[] { _avoidSide, -_avoidSide })
+                            {
+                                var cand = Quaternion.Euler(0f, sign * ang, 0f) * idealDir;
+                                if (Look(pos, baseY, cand, s, speed, maxDrop, out _) != Ahead.Clear) continue;
+                                chosenDir = cand;
+                                _avoidDir = cand;
+                                _avoidSide = sign;
+                                _avoidLockUntil = now + 0.28f;
+                                _avoidUntil = now + 0.55f;
+                                found = true;
+                                break;
+                            }
+                            if (found) break;
+                        }
+                        if (!found)
+                        {
+                            if (plDist > 2.4f && Look(pos, baseY, -idealDir, s, speed, maxDrop, out _) == Ahead.Clear)
+                            {
+                                chosenDir = -idealDir;
+                                _avoidDir = chosenDir;
+                                _avoidLockUntil = now + 0.28f;
+                                _avoidUntil = now + 0.55f;
+                            }
+                            else if (idealAhead == Ahead.Wall && TryClimb(now, pos, baseY, idealDir, s, blockHit))
+                            {
+                                return;
+                            }
+                        }
+                    }
+                }
+                target = YawOf(chosenDir);
             }
             else
             {
@@ -1657,35 +1784,104 @@ namespace ClassicSlimes
                 speed = now < _pauseUntil ? 0f : (charged ? ChargedSpeed : RunSpeed) * (now < _boostUntil ? 1.5f : 1f);
                 if (tired) speed = RunSpeed * 0.3f;
             }
-            float maxTurn = (fleeing ? 400f : charged ? 320f : 210f) * dt;
+
+            float maxTurn = (fleeing ? 560f : charged ? 340f : 220f) * dt;
+            if (fleeing && target.HasValue)
+            {
+                var curDir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                float turnErr = Mathf.Abs(Mathf.DeltaAngle(_yaw, target.Value));
+                if (turnErr > 12f && Look(pos, baseY, curDir, s, speed * 0.55f, maxDrop, out _) != Ahead.Clear)
+                {
+                    maxTurn = 900f * dt;
+                    speed *= Mathf.Lerp(1f, 0.35f, Mathf.InverseLerp(15f, 75f, turnErr));
+                }
+            }
             if (target.HasValue) _yaw = Mathf.MoveTowardsAngle(_yaw, target.Value, maxTurn);
             else _yaw += _turnRate * dt;
             var dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
-            if (speed > 0f)
+
+            if (!fleeing && speed > 0f)
             {
-                // drops: chased it jumps down from anything that isn't too high, roaming only when it is up above its home
-                float maxDrop = fleeing ? 10f : pos.y > _home.y + 1.5f ? 6f : 2.1f;
-                var a = Look(pos, dir, s, speed, maxDrop, out var wall);
-                if (a == Ahead.Wall && !tired && TryClimb(now, pos, dir, s, wall, fleeing || pos.y < _home.y - 1.5f)) return;
+                var a = Look(pos, baseY, dir, s, speed, maxDrop, out var wall);
                 if (a != Ahead.Clear)
                 {
-                    bool l = Look(pos, Quaternion.Euler(0f, -60f, 0f) * dir, s, speed, maxDrop, out _) != Ahead.Clear;
-                    bool r = Look(pos, Quaternion.Euler(0f, 60f, 0f) * dir, s, speed, maxDrop, out _) != Ahead.Clear;
-                    float side = (!l && r) ? -1f : (l && !r) ? 1f : (_turnRate >= 0f ? 1f : -1f);
-                    _yaw += side * (l && r ? 540f : 400f) * (fleeing ? 1.3f : 1f) * dt;
-                    if (l && r) speed *= 0.35f;   // dead end: brake and swing round
-                    _turnRate = side * Mathf.Abs(_turnRate);
-                    dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                    bool found = false;
+                    float pref = _turnRate >= 0f ? 1f : -1f;
+                    foreach (float ang in RoamAngles)
+                    {
+                        foreach (float sign in new[] { pref, -pref })
+                        {
+                            var cand = Quaternion.Euler(0f, sign * ang, 0f) * dir;
+                            if (Look(pos, baseY, cand, s, speed, maxDrop, out _) != Ahead.Clear) continue;
+                            _yaw = Mathf.MoveTowardsAngle(_yaw, YawOf(cand), 520f * dt);
+                            _turnRate = sign * Mathf.Abs(_turnRate);
+                            dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                            found = true;
+                            break;
+                        }
+                        if (found) break;
+                    }
+                    if (!found)
+                    {
+                        if (a == Ahead.Wall && !tired && pos.y < _home.y - 2.0f && TryClimb(now, pos, baseY, dir, s, wall)) return;
+                        _yaw += pref * 540f * dt;
+                        speed *= 0.35f;
+                        dir = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+                    }
                 }
             }
-            // grip: pull the horizontal velocity towards the heading, keep the vertical one (no hops)
+
+            // On a steep rock face (>42 deg): slide horizontally downhill off the boulder instead of pushing up it.
+            if (gndHit.normal.y < 0.74f)
+            {
+                var downXZ = new Vector3(gndHit.normal.x, 0f, gndHit.normal.z);
+                if (downXZ.sqrMagnitude > 1e-4f)
+                {
+                    dir = (downXZ.normalized * 0.72f + dir * 0.28f).normalized;
+                    _yaw = YawOf(dir);
+                }
+            }
+
+            // Project desired heading onto walkable slope & damp upward velocity before hill crests so it never launches into the air.
+            var gndNormal = gndHit.normal.y >= 0.74f ? gndHit.normal : Vector3.up;
+            var slopeDir = Vector3.ProjectOnPlane(dir, gndNormal);
+            slopeDir = slopeDir.sqrMagnitude > 1e-4f ? slopeDir.normalized : dir;
+            float crestDist = Mathf.Clamp(speed * 0.08f, 0.55f, 1.5f) * s;
+            var aheadOrigin = new Vector3(pos.x, baseY + 1.2f * s, pos.z) + dir * crestDist;
+            if (Physics.Raycast(aheadOrigin, Vector3.down, out var aheadGnd, 2.6f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
+            {
+                var chord = (dir * crestDist + Vector3.up * (aheadGnd.point.y - baseY)).normalized;
+                if (slopeDir.y > chord.y) slopeDir = chord;
+            }
+            else if (slopeDir.y > 0f)
+            {
+                slopeDir.y = 0f;
+                slopeDir.Normalize();
+            }
+            if (slopeDir.y > 0.52f)
+            {
+                slopeDir.y = 0.52f;
+                slopeDir.Normalize();
+            }
+
+            var targetVel = slopeDir * speed;
+            if (clearance > 0.04f * s)
+                targetVel.y -= Mathf.Clamp((clearance / s - 0.04f) * 18f, 0f, 6.5f);
+
             var v = _rb.linearVelocity;
-            var dv = dir * speed - new Vector3(v.x, 0f, v.z);
-            float maxDv = (fleeing ? FleeGrip : Grip) * (charged ? 1.5f : 1f) * (tired ? 0.4f : 1f) * dt;
+            float maxUpY = Mathf.Max(0.15f, targetVel.y + 0.20f);
+            if (v.y > maxUpY)
+            {
+                v.y = maxUpY;
+                _rb.linearVelocity = v;
+            }
+            var dv = targetVel - v;
+            if (clearance > 0.06f * s && dv.y > 0f) dv.y = 0f;
+            float maxDv = (fleeing ? FleeGrip : Grip) * (charged ? 1.45f : 1f) * (tired ? 0.4f : 1f) * dt;
             if (dv.magnitude > maxDv) dv = dv.normalized * maxDv;
             _rb.AddForce(dv, ForceMode.VelocityChange);
-            if (fleeing) _rb.AddForce(Vector3.down * 12f, ForceMode.Acceleration);   // hugs the ground at speed
-            if (speed > 0.5f) _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(dir, Vector3.up), 10f * dt));
+            if (gndHit.normal.y >= 0.74f) _rb.AddForce(-gndHit.normal * (fleeing ? 26f : 16f), ForceMode.Acceleration);
+            if (speed > 0.5f) _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(dir, Vector3.up), (fleeing ? 15f : 10f) * dt));
             if (now > _nextPause)
             {
                 _nextPause = now + U.Rand(5f, 12f);
@@ -1693,27 +1889,26 @@ namespace ClassicSlimes
             }
         }
 
-        /// <summary>A wall ahead with a top it can reach (up to ClimbHeight bodies): run up it (roaming: now and then).</summary>
-        bool TryClimb(float now, Vector3 pos, Vector3 dir, float s, RaycastHit wall, bool eager)
+        /// <summary>Only when boxed in: low step onto a flat ledge up to ClimbHeight bodies on a long cooldown.</summary>
+        [Il2CppInterop.Runtime.Attributes.HideFromIl2Cpp]
+        bool TryClimb(float now, Vector3 pos, float baseY, Vector3 dir, float s, RaycastHit wall)
         {
-            if (!eager)
-            {
-                if (now < _nextClimbRoll) return false;
-                _nextClimbRoll = now + U.Rand(1.5f, 3f);
-                if (U.Rng.NextDouble() > 0.45) return false;
-            }
-            if (!Physics.Raycast(pos + Vector3.up * (0.1f * s), Vector3.down, out var gnd, 1.5f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
-            float maxH = ClimbHeight * s, baseY = gnd.point.y;
-            var wallDir = -wall.normal; wallDir.y = 0f;
+            if (now < _nextClimbRoll) return false;
+            _nextClimbRoll = now + U.Rand(8f, 14f);
+            float maxH = ClimbHeight * s;
+            var wallDir = wall.collider != null ? -wall.normal : dir;
+            wallDir.y = 0f;
+            if (wallDir.sqrMagnitude < 0.01f) wallDir = dir;
             if (wallDir.sqrMagnitude < 0.01f) return false;
             wallDir.Normalize();
-            // headroom (no overhang above it), then the top of the wall just past its face
+            var wallPt = wall.collider != null ? wall.point : pos + wallDir * (0.9f * s);
+            // headroom (no overhang above it), then a flat ledge top just past its face
             if (Physics.Raycast(pos, Vector3.up, maxH + 0.8f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
-            var probe = new Vector3(wall.point.x, baseY + maxH + 0.8f * s, wall.point.z) + wallDir * (0.8f * s);
+            var probe = new Vector3(wallPt.x, baseY + maxH + 0.8f * s, wallPt.z) + wallDir * (0.8f * s);
             if (Physics.CheckSphere(probe, 0.3f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;   // taller than that
             if (!Physics.Raycast(probe, Vector3.down, out var top, maxH + 0.8f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
             float h = top.point.y - baseY;
-            if (top.normal.y < 0.6f || h < 0.5f * s || h > maxH) return false;
+            if (top.normal.y < 0.85f || h < 0.45f * s || h > maxH) return false;
             if (Physics.CheckSphere(top.point + Vector3.up * (0.75f * s), 0.4f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;   // no room up there
             if (Physics.Linecast(new Vector3(pos.x, top.point.y + 0.75f * s, pos.z), top.point + Vector3.up * (0.75f * s), U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
             if (Physics.Raycast(top.point + Vector3.up * 0.5f, Vector3.down, 1f, WaterMask, QueryTriggerInteraction.Collide)) return false;
@@ -1732,7 +1927,7 @@ namespace ClassicSlimes
             {
                 _climbUntil = 0f;
                 var v = _rb.linearVelocity;
-                _rb.linearVelocity = _climbDir * (Mathf.Max(RunSpeed, new Vector2(v.x, v.z).magnitude) * 0.8f) + Vector3.up * 1.5f;
+                _rb.linearVelocity = _climbDir * (Mathf.Max(RunSpeed, new Vector2(v.x, v.z).magnitude) * 0.8f) + Vector3.up * 0.25f;
                 return;
             }
             _rb.linearVelocity = _climbDir * 1.2f + Vector3.up * (ClimbSpeed * (charged ? 1.4f : 1f) * Mathf.Sqrt(s));
@@ -1805,11 +2000,12 @@ namespace ClassicSlimes
                 if (_shine != null) _shine.Emit(1);
             }
             bool posed = _rb != null && _rb.isKinematic;
-            if (_zigAt > 0f && now > _zigAt) Zig(posed);
+            bool localSim = !CoopCompat.IsCoop || CoopCompat.IsLocallySimulated(_rb);
+            if (_zigAt > 0f && now > _zigAt && localSim) Zig(posed);
             if (now > _nextDash)
             {
                 _nextDash = now + U.Rand(2.5f, 6f) * (charged ? 0.45f : 1f);
-                if (!posed && !Tired && now >= _climbUntil && U.Grounded(transform, s)) Dash(charged, center);
+                if (localSim && !posed && !Tired && now >= _fleeUntil && now >= _climbUntil && U.Grounded(transform, s)) Dash(charged, center);
             }
             if (!charged)
             {
@@ -1909,6 +2105,8 @@ namespace ClassicSlimes
         /// <summary>Dev: dash right now (away from the camera's right so it crosses the view).</summary>
         public void DevDash() => Dash(Charged, transform.position + Vector3.up * 0.6f);
 
+        static readonly float[] DashAngles = { 45f, -45f, 90f, -90f, 180f };
+
         void Dash(bool charged, Vector3 center)
         {
             if (_rb == null || _rb.isKinematic) return;
@@ -1923,11 +2121,37 @@ namespace ClassicSlimes
             dir.Normalize();
             if (Cfg.QuicksilverRuns.Value)
             {
+                float s = Mathf.Max(0.3f, transform.lossyScale.x);
+                var pos = transform.position;
+                bool hasGnd = Physics.Raycast(pos + Vector3.up * (0.45f * s), Vector3.down, out var gndHit, 1.35f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
+                float baseY = hasGnd ? gndHit.point.y : pos.y - 0.50f * s;
+                var gndNormal = (hasGnd && gndHit.normal.y >= 0.74f) ? gndHit.normal : Vector3.up;
+                float checkSpd = charged ? ChargedSpeed : RunSpeed;
+                if (Look(pos, baseY, dir, s, checkSpd, 2.1f, out _) != Ahead.Clear)
+                {
+                    bool found = false;
+                    foreach (float ang in DashAngles)
+                    {
+                        var cand = Quaternion.Euler(0f, ang, 0f) * dir;
+                        if (Look(pos, baseY, cand, s, checkSpd, 2.1f, out _) == Ahead.Clear)
+                        {
+                            dir = cand;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return;
+                }
+                var dashDir = Vector3.ProjectOnPlane(dir, gndNormal);
+                dashDir = dashDir.sqrMagnitude > 1e-4f ? dashDir.normalized : dir;
+                if (dashDir.y > 0.12f) { dashDir.y = 0.12f; dashDir.Normalize(); }
                 // a burst of speed along the ground (the runner keeps it on its new heading for a moment)
                 _yaw = YawOf(dir);
                 _boostUntil = Time.time + 0.7f;
                 _pauseUntil = 0f;
-                _rb.AddForce(dir * (charged ? 6f : 4f), ForceMode.VelocityChange);
+                _rb.AddForce(dashDir * (charged ? 5.5f : 3.8f), ForceMode.VelocityChange);
+                var dv = _rb.linearVelocity;
+                if (dv.y > 0.35f) { dv.y = 0.35f; _rb.linearVelocity = dv; }
             }
             else _rb.AddForce(dir * (charged ? 10f : 7f) + Vector3.up * 2.2f, ForceMode.VelocityChange);
             if (!charged) return;
@@ -1946,7 +2170,37 @@ namespace ClassicSlimes
             _zigAt = -1f;
             if (posed || _rb == null) return;
             var v = _rb.linearVelocity;
-            if (Cfg.QuicksilverRuns.Value) { _rb.linearVelocity = new Vector3(_zigDir.x * 9f, v.y, _zigDir.z * 9f); _yaw = YawOf(_zigDir); _boostUntil = Time.time + 0.4f; }
+            if (Cfg.QuicksilverRuns.Value)
+            {
+                if (Time.time < _fleeUntil) return;
+                float s = Mathf.Max(0.3f, transform.lossyScale.x);
+                var pos = transform.position;
+                bool hasGnd = Physics.Raycast(pos + Vector3.up * (0.45f * s), Vector3.down, out var gndHit, 1.35f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
+                float baseY = hasGnd ? gndHit.point.y : pos.y - 0.50f * s;
+                var gndNormal = (hasGnd && gndHit.normal.y >= 0.74f) ? gndHit.normal : Vector3.up;
+                var zDir = new Vector3(_zigDir.x, 0f, _zigDir.z);
+                if (zDir.sqrMagnitude < 1e-4f) return;
+                zDir.Normalize();
+                if (Look(pos, baseY, zDir, s, 9f, 2.1f, out _) != Ahead.Clear)
+                {
+                    var ref1 = Vector3.Reflect(zDir, transform.right); ref1.y = 0f;
+                    var ref2 = -zDir;
+                    if (ref1.sqrMagnitude > 1e-4f && Look(pos, baseY, ref1.normalized, s, 9f, 2.1f, out _) == Ahead.Clear)
+                        zDir = ref1.normalized;
+                    else if (Look(pos, baseY, ref2, s, 9f, 2.1f, out _) == Ahead.Clear)
+                        zDir = ref2;
+                    else
+                        return;
+                }
+                var zigSlope = Vector3.ProjectOnPlane(zDir, gndNormal);
+                zigSlope = zigSlope.sqrMagnitude > 1e-4f ? zigSlope.normalized : zDir;
+                if (zigSlope.y > 0.2f) { zigSlope.y = 0.2f; zigSlope.Normalize(); }
+                var nv = zigSlope * 9f;
+                nv.y = Mathf.Min(nv.y, Mathf.Min(v.y, 0.2f));
+                _rb.linearVelocity = nv;
+                _yaw = YawOf(zDir);
+                _boostUntil = Time.time + 0.4f;
+            }
             else _rb.linearVelocity = _zigDir * 9f + Vector3.up * Mathf.Max(v.y, 1.4f);
             if (_crackle != null) _crackle.Emit(5);
         }
@@ -1973,9 +2227,6 @@ namespace ClassicSlimes
         static readonly HashSet<IntPtr> DisguisePtrs = new();
         static List<SlimeFace> _faces;
 
-        public static readonly Dictionary<IntPtr, GlitchSlime> FleeNoHop = new();
-        readonly List<IntPtr> _fleeNoHopKeys = new();
-
         SlimeAppearanceApplicator _app;
         SlimeAppearance _own, _disguise;
         Vacuumable _vac;
@@ -1986,21 +2237,18 @@ namespace ClassicSlimes
         float _nextBlink, _rubberAt = -1f, _calmUntil, _nextJitter, _nextWaterFx, _nextHeldFx;
         int _blinkFrame = -10;
         Vector3 _rubberPos;
-        // caught + thrown -> smooth fast ground-hugging panic run
-        float _fleeUntil, _nextFleeBlink, _fleePendingAt = -1f, _fleeSteerSide = 1f, _fleeLockUntil, _nextFleeFx;
-        Vector3 _fleeDir;
+        // caught + thrown -> panic
+        float _fleeUntil, _nextFleeHop, _nextFleeBlink, _fleePendingAt = -1f;
         bool _wasHeld, _wasLaunched;
-        public static float FleeTime = 10f, FleeHop = 11f, FleeLift = 0f, FleeSpeed = 14.5f, FleeAccel = 62f;
+        public static float FleeTime = 10f, FleeHop = 11f, FleeLift = 2.3f;
         public bool Fleeing => Time.time < _fleeUntil;
         bool IsRadiant => _own != null && RadiantLooks.IsRadiantAppearance(_own);
 
         ParticleSystem _pixels, _trail, _burst;
         TrailRenderer _ribbon, _ribbon2;
-        static int _maskFrame = -1, _waterMask = -1;
+        static int _maskFrame = -1;
         static float _nextMask, _nextStrip, _burstUntil, _nextBurst;
         static bool _wasBurst, _flashOn, _flashSaved, _flashOnRad, _flashSavedRad;
-
-        static int WaterMask => _waterMask >= 0 ? _waterMask : (_waterMask = 1 << (LayerMask.NameToLayer("Water") >= 0 ? LayerMask.NameToLayer("Water") : 4));
 
         static readonly string[] FlashProps = { "_BlueTopColor", "_BlueMiddleColor", "_BlueBottomColor", "_GreenTopColor", "_GreenMiddleColor", "_GreenBottomColor" };
         static readonly Color[] FlashCols =
@@ -2151,8 +2399,6 @@ namespace ClassicSlimes
                 _trail = Gfx.Trail("GlitchTrail", transform, new Vector3(0f, TrailY, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.3f, 0.78f, 1f), 16f, 1.8f, 0.09f, 0.21f, 0.4f, 120);
             }
             if (_lastRadiant) SyncTrailPalette(true);
-            try { foreach (var c in GetComponentsInChildren<SlimeRandomMove>(true)) { FleeNoHop[c.Pointer] = this; _fleeNoHopKeys.Add(c.Pointer); } } catch { }
-            try { foreach (var c in GetComponentsInChildren<GotoConsumable>(true)) { FleeNoHop[c.Pointer] = this; _fleeNoHopKeys.Add(c.Pointer); } } catch { }
             float now = Time.time;
             _nextDisguise = now + U.Rand(4f, 10f);
             _nextBlink = now + U.Rand(8f, 20f);
@@ -2162,7 +2408,6 @@ namespace ClassicSlimes
         void OnDestroy()
         {
             All.Remove(this);
-            foreach (var k in _fleeNoHopKeys) FleeNoHop.Remove(k);
             try
             {
                 if (All.Count == 0)
@@ -2211,7 +2456,6 @@ namespace ClassicSlimes
             catch { }
             _flashOn = false;
             _flashOnRad = false;
-            FleeNoHop.Clear();
             All.Clear();
         }
 
@@ -2360,16 +2604,14 @@ namespace ClassicSlimes
             Apply(_own);
         }
 
-        /// <summary>Panic: sprints smoothly away over clear terrain, skirting rocks and cliffs without hopping into the air.</summary>
+        /// <summary>Panic: hops away from the rancher every half second, now and then blinks a few metres further away.</summary>
         public void StartFlee()
         {
             float now = Time.time;
             _fleePendingAt = -1f;
             _fleeUntil = now + FleeTime;
-            _nextFleeBlink = now + U.Rand(1.1f, 2.0f);
-            _fleeSteerSide = U.Rng.NextDouble() < 0.5 ? -1f : 1f;
-            _fleeLockUntil = 0f;
-            _fleeDir = Vector3.zero;
+            _nextFleeHop = now + 0.05f;
+            _nextFleeBlink = now + U.Rand(0.8f, 1.6f);
             _rubberAt = -1f;
             _nextDisguise = Mathf.Max(_nextDisguise, _fleeUntil + U.Rand(4f, 10f));
             _nextBlink = Mathf.Max(_nextBlink, _fleeUntil + U.Rand(4f, 10f));
@@ -2380,155 +2622,37 @@ namespace ClassicSlimes
             TriggerBurst(0.3f);
         }
 
-        static readonly float[] SteerAngles = { 30f, 55f, 80f, 110f, 140f, 165f };
-
-        static bool CanFleeAlong(Vector3 origin, Vector3 dir, float refGroundY, float s, float dist)
-        {
-            if (Physics.SphereCast(origin + Vector3.up * (0.38f * s), 0.26f * s, dir, out var wallHit, dist, U.GroundMask, QueryTriggerInteraction.Ignore)
-                && wallHit.normal.y < 0.82f)
-                return false;
-            foreach (float mul in new[] { 0.55f, 1.0f })
-            {
-                var probe = origin + dir * (dist * mul) + Vector3.up * (1.1f * s);
-                if (!Physics.Raycast(probe, Vector3.down, out var gHit, 4.2f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
-                if (gHit.normal.y < 0.80f) return false;
-                if (gHit.point.y - refGroundY > 0.48f * s) return false;
-                if (Physics.Raycast(probe, Vector3.down, out var wHit, gHit.distance, WaterMask, QueryTriggerInteraction.Collide)
-                    && (gHit.distance - wHit.distance > 0.35f * s))
-                    return false;
-            }
-            return true;
-        }
-
-        static bool SafeFlatGround(Vector3 around, Vector3 dir, float minR, float maxR, float spreadDeg, float originY, float s, out Vector3 point)
-        {
-            dir.y = 0f;
-            bool random = dir.sqrMagnitude < 1e-4f;
-            if (!random) dir.Normalize();
-            var lift = Vector3.up * (0.5f * s);
-            for (int i = 0; i < 8; i++)
-            {
-                Vector3 d = random
-                    ? Quaternion.Euler(0f, U.Rand(0f, 360f), 0f) * Vector3.forward
-                    : Quaternion.Euler(0f, U.Rand(-spreadDeg, spreadDeg), 0f) * dir;
-                var probe = around + d * U.Rand(minR, maxR) + Vector3.up * (2.0f * s);
-                if (Physics.Linecast(around + lift, probe, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
-                if (!Physics.Raycast(probe, Vector3.down, out var hit, 6.5f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
-                if (hit.normal.y < 0.82f || hit.point.y > originY + 0.55f * s) continue;
-                if (Physics.Linecast(around + lift, hit.point + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
-                if (Physics.Raycast(probe, Vector3.down, out var wHit, hit.distance, WaterMask, QueryTriggerInteraction.Collide)
-                    && (hit.distance - wHit.distance > 0.35f * s))
-                    continue;
-                point = hit.point;
-                return true;
-            }
-            point = around;
-            return false;
-        }
-
-        void FixedUpdate()
-        {
-            float now = Time.time;
-            if (now >= _fleeUntil || _rb == null || _rb.isKinematic) return;
-            if (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())) return;
-            if (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) return;
-
-            float s = Mathf.Max(0.3f, transform.lossyScale.x);
-            var pos = transform.position;
-            float dt = Time.fixedDeltaTime;
-            bool grounded = Physics.Raycast(pos + Vector3.up * (0.42f * s), Vector3.down, out var gHit, 1.45f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
-            float groundY = grounded ? gHit.point.y : pos.y - 0.5f * s;
-
-            var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
-            var away = pl != null ? pos - nearPlPos : transform.forward;
-            away.y = 0f;
-            away = away.sqrMagnitude > 1e-4f ? away.normalized : transform.forward;
-
-            // Already pushed onto a boulder/cliff face (>38.7 deg): slide immediately downhill off the rock.
-            if (grounded && gHit.normal.y < 0.78f)
-            {
-                var down = Vector3.ProjectOnPlane(Vector3.down, gHit.normal);
-                down.y = 0f;
-                if (down.sqrMagnitude > 1e-4f)
-                {
-                    _fleeDir = (down.normalized * 0.75f + away * 0.25f).normalized;
-                    _fleeLockUntil = now + 0.2f;
-                }
-            }
-            else
-            {
-                float lookDist = 2.8f * s;
-                if (now >= _fleeLockUntil || _fleeDir.sqrMagnitude < 0.25f || !CanFleeAlong(pos, _fleeDir, groundY, s, lookDist))
-                {
-                    if (CanFleeAlong(pos, away, groundY, s, lookDist))
-                    {
-                        _fleeDir = away;
-                    }
-                    else
-                    {
-                        bool found = false;
-                        foreach (float ang in SteerAngles)
-                        {
-                            foreach (float sign in new[] { _fleeSteerSide, -_fleeSteerSide })
-                            {
-                                var cand = Quaternion.Euler(0f, sign * ang, 0f) * away;
-                                if (!CanFleeAlong(pos, cand, groundY, s, lookDist)) continue;
-                                _fleeDir = cand;
-                                _fleeSteerSide = sign;
-                                _fleeLockUntil = now + 0.32f;
-                                found = true;
-                                break;
-                            }
-                            if (found) break;
-                        }
-                        if (!found) { _fleeDir = -away; _fleeLockUntil = now + 0.25f; }
-                    }
-                }
-            }
-
-            if (_fleeDir.sqrMagnitude < 1e-4f) _fleeDir = away;
-
-            if (grounded)
-            {
-                var tang = Vector3.ProjectOnPlane(_fleeDir, gHit.normal);
-                tang = tang.sqrMagnitude > 1e-4f ? tang.normalized : _fleeDir;
-                if (tang.y > 0.16f) { tang.y = 0.16f; tang.Normalize(); }
-                var targetVel = tang * FleeSpeed;
-                var nv = Vector3.MoveTowards(_rb.linearVelocity, targetVel, FleeAccel * dt);
-                nv.y = Mathf.Min(nv.y, Mathf.Max(0.12f, targetVel.y));
-                _rb.linearVelocity = nv;
-                _rb.AddForce(-gHit.normal * 22f, ForceMode.Acceleration);
-            }
-            else
-            {
-                var v = _rb.linearVelocity;
-                var horiz = Vector2.MoveTowards(new Vector2(v.x, v.z), new Vector2(_fleeDir.x, _fleeDir.z) * (FleeSpeed * 0.8f), 18f * dt);
-                _rb.linearVelocity = new Vector3(horiz.x, Mathf.Min(v.y, 0.15f), horiz.y);
-                _rb.AddForce(Vector3.down * 24f, ForceMode.Acceleration);
-            }
-            _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(_fleeDir, Vector3.up), 16f * dt));
-        }
-
         void Flee(float now)
         {
             if (_rb == null || _rb.isKinematic) return;
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
             var pos = transform.position;
             var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
-            if (pl != null && Vector3.Distance(pos, nearPlPos) > 34f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }
-            if (now > _nextFleeFx)
+            var away = pl != null ? pos - nearPlPos : Vector3.forward;
+            away.y = 0f;
+            float dist = away.magnitude;
+            if (pl != null && dist > 32f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }   // got away
+            away = dist > 0.01f ? away / dist : Vector3.forward;
+            if (!U.Grounded(transform, s)) return;
+            if (now > _nextFleeBlink)
             {
-                _nextFleeFx = now + U.Rand(0.14f, 0.24f);
-                if (_pixels != null) _pixels.Emit(U.Rng.Next(2, 5));
-                if (U.Rng.NextDouble() < 0.4) TriggerBurst(U.Rand(0.06f, 0.14f));
-            }
-            if (now > _nextFleeBlink && U.Grounded(transform, s))
-            {
-                _nextFleeBlink = now + U.Rand(1.4f, 2.4f);
-                var away = _fleeDir.sqrMagnitude > 0.25f ? _fleeDir : (pl != null ? pos - nearPlPos : transform.forward);
-                if (SafeFlatGround(pos, away, 4.0f * s, 7.5f * s, 32f, pos.y, s, out var to))
+                _nextFleeBlink = now + U.Rand(1.2f, 2.2f);
+                var lift = Vector3.up * (0.5f * s);
+                if (U.GroundPointToward(pos, away, 4.5f * s, 8f * s, 40f, out var to) && !Physics.Linecast(pos + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore))
+                {
                     Jump(to, true);
+                    return;
+                }
             }
+            if (now < _nextFleeHop) return;
+            _nextFleeHop = now + U.Rand(0.1f, 0.2f);
+            var dir = Quaternion.Euler(0f, U.Rand(-35f, 35f), 0f) * away;
+            if (Physics.Raycast(pos + Vector3.up * (0.4f * s), dir, 2.6f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
+                dir = Quaternion.Euler(0f, U.Rng.NextDouble() < 0.5 ? -80f : 80f, 0f) * dir;   // wall ahead: veer off
+            _rb.linearVelocity = dir * FleeHop + Vector3.up * FleeLift;
+            _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));
+            if (_pixels != null) _pixels.Emit(U.Rng.Next(2, 5));
+            if (U.Rng.NextDouble() < 0.4) TriggerBurst(U.Rand(0.06f, 0.14f));
         }
 
         /// <summary>Water stabilises it: reveals a disguise, then no disguises or blinks for a while.</summary>
@@ -2556,23 +2680,14 @@ namespace ClassicSlimes
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
             if (!dev && !U.Grounded(transform, s)) return;
             var from = transform.position;
-            if (dev)
+            var lift = Vector3.up * (0.5f * s);
+            for (int i = 0; i < 4; i++)
             {
-                var lift = Vector3.up * (0.5f * s);
-                for (int i = 0; i < 4; i++)
-                {
-                    if (!U.GroundPoint(from, 2f * s, 5f * s, out var to)) continue;
-                    if (Physics.Linecast(from + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
-                    Jump(to, true);
-                    if (U.Rng.NextDouble() < 0.3) { _rubberPos = from; _rubberAt = now + U.Rand(0.3f, 0.45f); }
-                    return;
-                }
-                return;
-            }
-            if (SafeFlatGround(from, Vector3.zero, 2f * s, 5f * s, 180f, from.y, s, out var flatTo))
-            {
-                Jump(flatTo, true);
+                if (!U.GroundPoint(from, 2f * s, 5f * s, out var to)) continue;
+                if (Physics.Linecast(from + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                Jump(to, true);
                 if (U.Rng.NextDouble() < 0.3) { _rubberPos = from; _rubberAt = now + U.Rand(0.3f, 0.45f); }
+                return;
             }
         }
 
