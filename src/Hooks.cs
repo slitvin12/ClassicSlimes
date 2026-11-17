@@ -31,11 +31,16 @@ namespace ClassicSlimes
 
         static bool Prefix(UnityEngine.Object __0)
         {
-            if (Faces.Protected.Count == 0 || (object)__0 == null) return true;
+            if (Faces.Protected.Count == 0 || __0 == null) return true;
             IntPtr p;
             try { p = __0.Pointer; } catch { return true; }
             if (!Faces.Protected.Contains(p)) return true;
-            if (Blocked++ == 0) ClassicSlimesMod.Log.Msg("[faces] the game tried to destroy shared face material " + __0.name + " - kept alive (further cases are silent)");
+            if (Blocked++ == 0)
+            {
+                string n = "?";
+                try { n = __0.name; } catch { }
+                ClassicSlimesMod.Log.Msg("[faces] the game tried to destroy shared face material " + n + " - kept alive (further cases are silent)");
+            }
             return false;
         }
     }
@@ -146,7 +151,7 @@ namespace ClassicSlimes
                 if (otherId == null) return;
                 var qs = __instance.GetComponent<QuicksilverSlime>();
                 if (qs == null) return;
-                var rad = SlimeFactory.Spec("Rad")?.Plort;
+                var rad = SlimeFactory.Spec("Rad")?.Plort ?? CottonLibrary.Library.GetPlort("PhosphorPlort");
                 if (rad != null && otherId == rad) qs.Overcharge(60f);
                 else if (otherId.IsPlort) qs.Overcharge(15f);
             }
@@ -160,7 +165,7 @@ namespace ClassicSlimes
     {
         static bool Prefix(SlimeRandomMove __instance)
         {
-            try { return QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.ContainsKey(__instance.Pointer); }
+            try { return !Cfg.QuicksilverRuns.Value || QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.ContainsKey(__instance.Pointer); }
             catch { return true; }
         }
     }
@@ -173,7 +178,7 @@ namespace ClassicSlimes
         {
             try
             {
-                if (QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.TryGetValue(__instance.Pointer, out var qs) || qs == null) return true;
+                if (!Cfg.QuicksilverRuns.Value || QuicksilverSlime.NoHop.Count == 0 || !QuicksilverSlime.NoHop.TryGetValue(__instance.Pointer, out var qs) || qs == null) return true;
                 var t = __instance._target;
                 if (t != null) qs.RunTo(t.transform.position);
                 return false;
@@ -236,6 +241,8 @@ namespace ClassicSlimes
     {
         static readonly Dictionary<IntPtr, IdentifiableType> _lastBait = new();
 
+        internal static void ClearSession() => _lastBait.Clear();
+
         static void EnsureSnareFoodGroup(GordoSnare snare)
         {
             var fg = snare != null ? snare.FoodTypeGroup : null;
@@ -258,15 +265,14 @@ namespace ClassicSlimes
         {
             if (snare == null) return;
             EnsureSnareFoodGroup(snare);
-            if (baitType != null) _lastBait[snare.Pointer] = baitType;
-            else _lastBait.TryGetValue(snare.Pointer, out baitType);
-            if (baitType == null)
+            if (baitType == null) baitType = snare._model?.baitTypeId;
+            if (baitType == null && snare.Bait != null && snare.Bait.activeSelf)
             {
-                // Fallback: resolve from Bait's IdentifiableActor if instantiated from prefab
-                var bGo = snare.Bait;
-                var ida = bGo != null ? bGo.GetComponentInChildren<IdentifiableActor>(true) : null;
+                var ida = snare.Bait.GetComponentInChildren<IdentifiableActor>(true);
                 if (ida != null) baitType = ida.identType;
             }
+            if (baitType != null) _lastBait[snare.Pointer] = baitType;
+            else { _lastBait.Remove(snare.Pointer); return; }
             if (baitType == null || baitType.prefab == null) return;
             Foods.FixLemon(baitType.prefab, false);
             var baitGo = snare.Bait;
@@ -433,15 +439,73 @@ namespace ClassicSlimes
     [HarmonyPatch(typeof(GordoEat), nameof(GordoEat.Awake))]
     static class ClassicGordoSpawnIdPatch
     {
+        static bool IsFromSnare(GordoEat eat, IdentifiableType gordoType)
+        {
+            if (eat.GetComponentInParent<GordoSnare>() != null) return true;
+            var pos = eat.transform.position;
+            foreach (var snare in UnityEngine.Object.FindObjectsOfType<GordoSnare>())
+            {
+                if (snare == null || !snare.gameObject.activeInHierarchy) continue;
+                if ((snare.transform.position - pos).sqrMagnitude <= 9f) return true;
+                try { if (snare._model != null && snare._model.gordoTypeId == gordoType && !snare.HasSnaredGordo()) return true; } catch { }
+            }
+            return false;
+        }
+
         static void Prefix(GordoEat __instance)
         {
             try
             {
                 if (__instance == null || !string.IsNullOrEmpty(__instance._id)) return;
-                if (__instance.GetComponentInParent<GordoSnare>() != null) return;
                 var gi = __instance.GetComponent<GordoIdentifiable>();
                 if (gi == null || !Gordos.IsClassicGordoType(gi.identType)) return;
+                if (IsFromSnare(__instance, gi.identType)) return;
                 __instance._id = Gordos.IdPrefix + "Spawn_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            }
+            catch { }
+        }
+
+        static void Postfix(GordoEat __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                var gi = __instance.GetComponent<GordoIdentifiable>();
+                if (gi != null && Gordos.IsClassicGordoType(gi.identType)) Gordos.Extras(__instance.gameObject, gi.identType);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// Allows catching classic Rad / Quantum / Mosaic gordos on Gordo Snares using SR1 favorite baits
+    /// (Oca Oca / Phase Lemon / Silver Parsnip) and guards against empty-bait NREs in snare resolution.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.DataModel.SnareModel), nameof(Il2CppMonomiPark.SlimeRancher.DataModel.SnareModel.GetGordoIdForBait))]
+    static class ClassicGordoSnareCapturePatch
+    {
+        static Exception Finalizer(Exception __exception, Il2CppMonomiPark.SlimeRancher.DataModel.SnareModel __instance)
+        {
+            if (__exception is NullReferenceException && (__instance == null || __instance.baitTypeId == null))
+                return null;
+            return __exception;
+        }
+
+        static void Postfix(Il2CppMonomiPark.SlimeRancher.DataModel.SnareModel __instance, ref IdentifiableType __result)
+        {
+            try
+            {
+                if (!Cfg.EnableFoods.Value || __instance == null || __instance.baitTypeId == null) return;
+                string key = __instance.baitTypeId.name switch
+                {
+                    "OcaocaVeggie" => "Rad",
+                    "LemonFruit" => "Quantum",
+                    "ParsnipVeggie" => "Mosaic",
+                    _ => null
+                };
+                if (key == null || !Gordos.Types.TryGetValue(key, out var gordoType) || gordoType == null) return;
+                bool master = (__instance.ident?.name ?? "").IndexOf("Master", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (master || U.Rng.NextDouble() < 0.45) __result = gordoType;
             }
             catch { }
         }

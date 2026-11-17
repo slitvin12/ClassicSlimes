@@ -100,8 +100,9 @@ namespace ClassicSlimes
             var t = _vis;
             if (t == null || _rbe == null || _root == null) { Ok = false; return; }
             // moved by someone else (animation, vacuum): that is the new rest pose
-            if ((t.localPosition - _wPos).sqrMagnitude > 1e-8f || Quaternion.Angle(t.localRotation, _wRot) > 0.05f || (t.localScale - _wScale).sqrMagnitude > 1e-8f)
-            { _vPos = t.localPosition; _vRot = t.localRotation; _vScale = t.localScale; }
+            if ((t.localPosition - _wPos).sqrMagnitude > 1e-6f) _vPos = t.localPosition;
+            if (Quaternion.Angle(t.localRotation, _wRot) > 0.05f) _vRot = t.localRotation;
+            if ((t.localScale - _wScale).sqrMagnitude > 1e-6f) _vScale = t.localScale;
             if (_rbe.strength != 0f) { _rbeStrength = _rbe.strength; _rbe.strength = 0f; }
             var off = Spring() * Gain;
             _lastOff = off;
@@ -111,7 +112,7 @@ namespace ClassicSlimes
             float ang = Mathf.Min(MaxLean, Mathf.Atan2(hor.magnitude, h) * Mathf.Rad2Deg);
             var rot = ang > 0.01f ? Quaternion.AngleAxis(ang, Vector3.Cross(Vector3.up, hor).normalized) : Quaternion.identity;
             // stretch / squash: the vertical jiggle, volume kept
-            float sy = 1f + Mathf.Clamp(off.y / h, -MaxStretch, MaxStretch), sxz = 1f / Mathf.Sqrt(sy);
+            float sy = Mathf.Max(0.1f, 1f + Mathf.Clamp(off.y / h, -MaxStretch, MaxStretch)), sxz = 1f / Mathf.Sqrt(sy);
             var sl = new Vector3(_upAxis == 0 ? sy : sxz, _upAxis == 1 ? sy : sxz, _upAxis == 2 ? sy : sxz);
             t.localPosition = _pivot + rot * Vector3.Scale(new Vector3(sxz, sy, sxz), _vPos - _pivot);
             t.localRotation = rot * _vRot;

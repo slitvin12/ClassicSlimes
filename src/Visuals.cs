@@ -57,7 +57,7 @@ namespace ClassicSlimes
         static void SetBodyMaterial(SlimeAppearance app, Material m, Material second = null)
         {
             if (m == null) return;
-            app.Structures[0].DefaultMaterials = new Il2CppReferenceArray<Material>(second != null ? new[] { m, second } : new[] { m });
+            app.Structures[0].DefaultMaterials = Gc.Array(second != null ? new[] { m, second } : new[] { m });
         }
 
         static int FaceIndex(SlimeAppearance app)
@@ -80,7 +80,7 @@ namespace ClassicSlimes
             foreach (var x in app._structures) list.Add(x);
             int fi = FaceIndex(app);
             if (fi < 0) list.Add(st); else list.Insert(fi, st);
-            app._structures = new Il2CppReferenceArray<SlimeAppearanceStructure>(list.ToArray());
+            app._structures = Gc.Array(list);
         }
 
         static SlimeAppearanceObject BodyTemplate() => PinkApp.Structures[0].Element.Prefabs[0];
@@ -95,9 +95,11 @@ namespace ClassicSlimes
             smr.shadowCastingMode = shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             var sao = go.GetComponent<SlimeAppearanceObject>();
             sao.RootBone = (Bone)root;
-            sao.ParentBone = Bone.NONE;
             if (attached != null)
+            {
+                sao.ParentBone = Bone.NONE;
                 sao.AttachedBones = new Il2CppStructArray<Bone>(attached.Select(i => (Bone)i).ToArray());
+            }
             sao.IgnoreLODIndex = true;
             sao.LODIndex = 0;
             return sao;
@@ -113,10 +115,10 @@ namespace ClassicSlimes
             el.CastsShadows = true;
             el.MaterialInheritance = SlimeAppearanceElement.MatInheritType.NONE;
             el.hideFlags = HideFlags.DontUnloadUnusedAsset;
-            el.Prefabs = new Il2CppReferenceArray<SlimeAppearanceObject>(prefabs);
+            el.Prefabs = Gc.Array(prefabs);
             st.Element = el;
             st.SupportsFaces = faces;
-            if (mat != null) st.DefaultMaterials = new Il2CppReferenceArray<Material>(new[] { mat });
+            if (mat != null) st.DefaultMaterials = Gc.Array(new[] { mat });
             try
             {
                 var em = template.ElementMaterials;
@@ -124,7 +126,7 @@ namespace ClassicSlimes
                 {
                     var arr = new SlimeAppearanceMaterials[prefabs.Length];
                     for (int i = 0; i < arr.Length; i++) arr[i] = em[Math.Min(i, em.Length - 1)];
-                    st.ElementMaterials = new Il2CppReferenceArray<SlimeAppearanceMaterials>(arr);
+                    st.ElementMaterials = Gc.Array(arr);
                 }
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("ElementMaterials: " + e.Message); }
@@ -212,16 +214,14 @@ namespace ClassicSlimes
                 if (swirl != null)
                 {
                     m.Tx("_ColorMask", swirl);
-                    m.SetTextureScale("_ColorMask", Vector2.one);
-                    m.SetTextureOffset("_ColorMask", Vector2.zero);
+                    if (m.HasProperty("_ColorMask")) { m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero); }
                     m.Flt("_ColorMaskUV1", Swirl.LastSet);
                 }
                 else
                 {
                     ClassicSlimesMod.Log.Warning("Quantum swirl not baked: " + Swirl.Info);
                     m.Tx("_ColorMask", Res.Tex("msk_quantumSpiral", true, false) ?? Gfx.SwirlMask);   // SR1 quantumStatic spiral
-                    m.SetTextureScale("_ColorMask", Gfx.SwirlScale);
-                    m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
+                    if (m.HasProperty("_ColorMask")) { m.SetTextureScale("_ColorMask", Gfx.SwirlScale); m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset); }
                     m.Flt("_ColorMaskUV1", 0f);
                 }
                 m.Col("_RedTopColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedMiddleColor", new Color(1f, 0.94f, 0.58f)); m.Col("_RedBottomColor", new Color(1f, 0.94f, 0.58f));
@@ -404,10 +404,11 @@ namespace ClassicSlimes
         // ------------------------------------------------------------------ Quicksilver
         static Mesh ProjectFace(Mesh face, string bodyMesh, Vector3 faceCenter, Vector3 bodyCenter, float push)
         {
-            if (face == null || !Res.Data.TryGetValue(bodyMesh, out var bd)) return null;
+            if (face == null || !face.isReadable || !Res.Data.TryGetValue(bodyMesh, out var bd)) return null;
+            var src = face.vertices;
+            if (src == null || src.Length == 0) return null;
             var m = Object.Instantiate(face);
             m.name = face.name + "_" + bodyMesh;
-            var src = face.vertices;
             int n = src.Length;
             var outV = new Vector3[n];
             for (int i = 0; i < n; i++)
@@ -424,6 +425,7 @@ namespace ClassicSlimes
             m.vertices = outV;
             m.RecalculateNormals();
             m.RecalculateBounds();
+            if (m.uv != null && m.uv.Length == n) m.RecalculateTangents();
             m.hideFlags = HideFlags.HideAndDontSave;
             Object.DontDestroyOnLoad(m);
             return m;

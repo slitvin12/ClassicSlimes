@@ -36,8 +36,9 @@ namespace ClassicSlimes
         static void Basis(out Vector3 c, out Vector3 e1, out Vector3 e2)
         {
             c = Dir.normalized;
-            e1 = Vector3.Cross(c, Vector3.up).normalized;   // the viewer's right
-            e2 = Vector3.Cross(e1, c);                       // up
+            var upRef = Mathf.Abs(c.y) > 0.99f ? Vector3.right : Vector3.up;
+            e1 = Vector3.Cross(c, upRef).normalized;   // the viewer's right
+            e2 = Vector3.Cross(e1, c);                  // up
         }
 
         /// <summary>Spiral coverage (0-1) of a body point in mesh space.</summary>
@@ -66,7 +67,7 @@ namespace ClassicSlimes
             float tt = te + s * span;
             var pt = new Vector2(rTip * Mathf.Cos(tt), rTip * Mathf.Sin(tt));
             best = Mathf.Min(best, Mathf.Min((q - pe).magnitude, (q - pt).magnitude));
-            return Mathf.Clamp01((Width - best) / Soft + 0.5f);
+            return Mathf.Clamp01((Width - best) / Mathf.Max(1e-4f, Soft) + 0.5f);
         }
 
         /// <summary>Rasterises the mesh triangles in UV space: per texel the body point it covers (first triangle wins).</summary>
@@ -110,7 +111,7 @@ namespace ClassicSlimes
             return written == 0 ? 2f : ov / (float)written;
         }
 
-        static readonly System.Collections.Generic.Dictionary<string, (Texture2D tex, int set)> _shared = new();
+        static readonly System.Collections.Generic.Dictionary<int, (Texture2D tex, int set)> _shared = new();
         /// <summary>
         /// Spiral mask for a largo body mesh, baked once per mesh and kept (never destroyed by later bakes,
         /// unlike <see cref="Bake"/>'s single debug texture). <paramref name="set"/> = uv set for _ColorMaskUV1.
@@ -119,14 +120,22 @@ namespace ClassicSlimes
         {
             set = 0;
             if (mesh == null) return null;
-            if (_shared.TryGetValue(mesh.name, out var e) && e.tex != null) { set = e.set; return e.tex; }
+            int id = mesh.GetInstanceID();
+            if (_shared.TryGetValue(id, out var e) && e.tex != null) { set = e.set; return e.tex; }
             var keep = _last; _last = null;   // this bake must not destroy the base quantum's mask
             int lastSet = LastSet;
             var tex = Bake(mesh);
             _last = keep;
-            if (tex != null) { set = LastSet; _shared[mesh.name] = (tex, set); }
+            if (tex != null) { set = LastSet; _shared[id] = (tex, set); }
             LastSet = lastSet;
             return tex;
+        }
+
+        internal static void ClearSession()
+        {
+            var dead = new System.Collections.Generic.List<int>();
+            foreach (var kv in _shared) if (kv.Value.tex == null) dead.Add(kv.Key);
+            foreach (var k in dead) _shared.Remove(k);
         }
 
         /// <summary>The spiral mask (red channel) for the body mesh, or null when the mesh can't be read.</summary>

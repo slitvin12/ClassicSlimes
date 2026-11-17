@@ -103,9 +103,10 @@ namespace ClassicSlimes
                 flat.Normalize();
                 st.Go = Foods.SpawnActor(t, ct.position + fwd * 3f, Quaternion.LookRotation(-flat, Vector3.up));
                 if (st.Go == null) { L("spawn failed " + t.name); yield break; }
-                for (int f = 0; f < 20; f++) yield return null;
+                float spawnReadyAt = Time.time + 0.35f;
+                for (int f = 0; f < 20 || Time.time < spawnReadyAt; f++) yield return null;
                 if (st.Go == null) { L("actor gone"); yield break; }
-                foreach (var rb in st.Go.GetComponentsInChildren<Rigidbody>()) { if (!rb.isKinematic) rb.velocity = Vector3.zero; rb.isKinematic = true; }
+                foreach (var rb in st.Go.GetComponentsInChildren<Rigidbody>()) { if (!rb.isKinematic) rb.linearVelocity = Vector3.zero; rb.isKinematic = true; }
                 var rot = Quaternion.AngleAxis(tilt, right) * Quaternion.LookRotation(-flat, Vector3.up) * Quaternion.Euler(0f, yaw, 0f);
                 st.Go.transform.rotation = rot;
                 float halfV = cam.fieldOfView * 0.5f * Mathf.Deg2Rad;
@@ -173,6 +174,7 @@ namespace ClassicSlimes
                     foreach (var c in st.Canvases) if (c != null) c.enabled = true;
                     foreach (var r in st.Hidden) if (r != null) r.enabled = true;
                     if (st.Backdrop != null) Object.Destroy(st.Backdrop);
+                    if (st.Mat != null) Object.Destroy(st.Mat);
                     if (st.Go != null) Destroyer.DestroyActor(st.Go, "ClassicSlimes.PediaShot", true);
                 }
                 catch (Exception e) { L("restore: " + e.Message); }

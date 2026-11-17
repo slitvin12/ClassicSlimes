@@ -25,6 +25,7 @@ namespace ClassicSlimes
         static Func<GameObject, object> _fnActorLinkOf;
         static PropertyInfo _propLocallyOwned, _propLocalVacPred;
         static FieldInfo _fldAvatarsAll, _fldAvatarRoot, _fldAvatarTransform;
+        static FieldInfo _fldVacExpelDepth, _fldHostConsumeDepth;
 
         public static bool IsCoop { get { Poll(); return _isCoop; } }
         public static bool IsHost { get { Poll(); return _isHost; } }
@@ -110,13 +111,16 @@ namespace ClassicSlimes
                     var allFld = avatarsType?.GetField("All", S);
                     var rootFld = avatarType?.GetField("Root", I);
                     var trFld = avatarType?.GetField("transform", I);
-                    if (allFld != null && rootFld != null && trFld != null)
+                    if (allFld != null && rootFld != null)
                     {
                         _fldAvatarsAll = allFld;
                         _fldAvatarRoot = rootFld;
                         _fldAvatarTransform = trFld;
                     }
                 }
+
+                _fldVacExpelDepth ??= lyc.GetType("Lycoreia.Game.Hooks.VacuumExpelHook")?.GetField("Depth", S);
+                _fldHostConsumeDepth ??= lyc.GetType("Lycoreia.Game.Hooks.SlimeFoodAuthorityHook")?.GetField("HostConsumeDepth", S);
 
                 _bound = _fnHost != null && _fnClient != null;
                 if (_bound) ClassicSlimesMod.Log?.Msg("Co-op compatibility active: Lycoreia detected");
@@ -182,6 +186,15 @@ namespace ClassicSlimes
         {
             Poll();
             if (!_isCoop) return rb == null || !rb.isKinematic;
+            if (rb != null && _fnActorLinkOf != null && _propLocallyOwned != null)
+            {
+                try
+                {
+                    var link = _fnActorLinkOf(rb.gameObject);
+                    if (link != null) return (bool)_propLocallyOwned.GetValue(link);
+                }
+                catch { }
+            }
             return rb != null && !rb.isKinematic;
         }
 
@@ -201,8 +214,58 @@ namespace ClassicSlimes
         public static void AnnounceSpawn(GameObject go)
         {
             Poll();
-            if (!_isCoop || go == null || _fnAnnounce == null) return;
-            try { _fnAnnounce(go); } catch { }
+            if (!_isCoop || go == null) return;
+            if (_fnAnnounce == null && _hasSr2mp)
+            {
+                try
+                {
+                    foreach (var m in MelonLoader.MelonMod.RegisteredMelons)
+                    {
+                        var asm = m.MelonAssembly?.Assembly;
+                        if (asm == null || !string.Equals(asm.GetName().Name, "SR2MP", StringComparison.OrdinalIgnoreCase)) continue;
+                        var globals = asm.GetType("SR2MP.GlobalVariables");
+                        var mgr = globals?.GetField("ActorManager", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null);
+                        var reg = mgr?.GetType().GetMethod("RegisterSpawnOverNetwork", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(GameObject) }, null);
+                        if (reg != null && reg.ReturnType == typeof(void))
+                            _fnAnnounce = (Action<GameObject>)Delegate.CreateDelegate(typeof(Action<GameObject>), mgr, reg);
+                        break;
+                    }
+                }
+                catch { }
+            }
+            if (_fnAnnounce == null) return;
+            bool incDepth = _isGuest && _fldVacExpelDepth != null;
+            int prevDepth = 0;
+            if (incDepth)
+            {
+                try { prevDepth = (int)(_fldVacExpelDepth.GetValue(null) ?? 0); _fldVacExpelDepth.SetValue(null, prevDepth + 1); }
+                catch { incDepth = false; }
+            }
+            try { _fnAnnounce(go); }
+            catch { }
+            finally
+            {
+                if (incDepth) try { _fldVacExpelDepth.SetValue(null, prevDepth); } catch { }
+            }
+        }
+
+        /// <summary>Destroys a scene/shared actor on the Host with Lycoreia HostConsumeDepth when suppressing guest authority doesn't apply.</summary>
+        public static void DestroySharedActor(GameObject go, string source, bool okForNonNetwork = false)
+        {
+            if (go == null) return;
+            Poll();
+            bool incHost = _isCoop && _isHost && _fldHostConsumeDepth != null;
+            int prevDepth = 0;
+            if (incHost)
+            {
+                try { prevDepth = (int)(_fldHostConsumeDepth.GetValue(null) ?? 0); _fldHostConsumeDepth.SetValue(null, prevDepth + 1); }
+                catch { incHost = false; }
+            }
+            try { Destroyer.DestroyActor(go, source, okForNonNetwork); }
+            finally
+            {
+                if (incHost) try { _fldHostConsumeDepth.SetValue(null, prevDepth); } catch { }
+            }
         }
 
         /// <summary>True when held by the local player's vacpack (prevents remote ReplicaMotion.SetHeld from triggering Glitch debug rewards/despawn).</summary>
@@ -212,22 +275,17 @@ namespace ClassicSlimes
             Poll();
             if (!_isCoop) return true;
 
-            if (_fnActorLinkOf != null && _propLocallyOwned != null && _propLocalVacPred != null)
-            {
-                try
-                {
-                    var link = _fnActorLinkOf(vac.gameObject);
-                    if (link != null)
-                        return (bool)_propLocallyOwned.GetValue(link) || (bool)_propLocalVacPred.GetValue(link);
-                }
-                catch { }
-            }
-
             try
             {
                 var vi = SceneContext.Instance?.PlayerState?.VacuumItem;
                 if (vi == null) return false;
-                if (vi._held != null && vi._held.Pointer == vac.gameObject.Pointer) return true;
+                if (vi._held != null) return vi._held.Pointer == vac.gameObject.Pointer;
+                if (vac.Size == VacuumableSize.LARGE) return false;
+                if (_fnActorLinkOf != null && _propLocalVacPred != null)
+                {
+                    var link = _fnActorLinkOf(vac.gameObject);
+                    if (link != null) return (bool)_propLocalVacPred.GetValue(link);
+                }
                 return vi._vacPressed && vi._vacMode == VacuumItem.VacMode.VAC && U.DistToPlayer(vac.transform.position) < Mathf.Max(8f, vi.MaxVacDist + 2f);
             }
             catch { return false; }
@@ -261,7 +319,7 @@ namespace ClassicSlimes
                         if (av == null) continue;
                         var root = _fldAvatarRoot.GetValue(av) as GameObject;
                         if (root == null || !root.activeInHierarchy) continue;
-                        var tr = _fldAvatarTransform.GetValue(av) as Transform;
+                        var tr = (_fldAvatarTransform?.GetValue(av) as Transform) ?? root.transform;
                         if (tr == null) continue;
                         var rp = tr.position;
                         float d = Vector3.Distance(pos, rp);

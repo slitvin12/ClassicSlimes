@@ -41,7 +41,7 @@ namespace ClassicSlimes
             var cam = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
             foreach (var e in Resources.FindObjectsOfTypeAll<GordoEat>())
             {
-                if (e == null || !e.gameObject.scene.IsValid()) continue;
+                if (!Gordos.InScene(e)) continue;
                 float d = (e.transform.position - cam).sqrMagnitude;
                 if (d < bd) { bd = d; best = e; }
             }

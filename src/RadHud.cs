@@ -57,10 +57,10 @@ namespace ClassicSlimes
             {
                 if (Cfg.RadHud.Value)
                 {
-                    if (_meter == null && Time.unscaledTime > _nextFind) { _nextFind = Time.unscaledTime + 3f; _meter = Find(); if (_meter != null) Place(); }
+                    if (_meter == null && Time.unscaledTime > _nextFind) { _nextFind = Time.unscaledTime + 3f; _meter = Find(); }
                     if (_meter != null && !_meter.gameObject.activeSelf) { Place(); _meter.gameObject.SetActive(true); }
                 }
-                Recover();
+                if (Time.timeScale > 0f) Recover();
             }
             catch (Exception e) { if (Diag.Enabled) ClassicSlimesMod.Log.Warning("RadHud: " + e.Message); }
         }

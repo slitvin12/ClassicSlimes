@@ -170,11 +170,21 @@ namespace ClassicSlimes
             for (int i = _made.Count - 1; i >= 0; i--)
             {
                 var m = _made[i];
+                if ((object)m == null) { _made.RemoveAt(i); Destroyed++; continue; }
                 if (m == null)
                 {
+                    IntPtr ptr = IntPtr.Zero;
+                    try { ptr = m.Pointer; } catch { }
+                    string dn = null;
+                    if (ptr != IntPtr.Zero)
+                    {
+                        _names.TryGetValue(ptr, out dn);
+                        _madeSet.Remove(ptr);
+                        _snaps.Remove(ptr);
+                        _names.Remove(ptr);
+                    }
                     _made.RemoveAt(i); Destroyed++;
-                    _names.TryGetValue(m.Pointer, out var dn);
-                    ClassicSlimesMod.Log.Warning($"[mat] tracked material destroyed by the game: {dn} (t={Time.time:F1})");
+                    ClassicSlimesMod.Log.Warning($"[mat] tracked material destroyed by the game: {dn ?? "?"} (t={Time.time:F1})");
                     continue;
                 }
                 _snaps.TryGetValue(m.Pointer, out var s);
@@ -381,7 +391,7 @@ namespace ClassicSlimes
             try { c.Template = null; } catch { }
             c.AudioClips = list;
             c.Loops = loop;
-            c.Volume = new Vector2(volume, volume);
+            if (volume > 0f) c.Volume = new Vector2(volume, volume);
             c.Pitch = loop ? new Vector2(1f, 1f) : new Vector2(0.94f, 1.06f);
             if (maxDistance > 0f) c.MaxDistance = maxDistance;
             _cues[key] = c;
@@ -431,7 +441,7 @@ namespace ClassicSlimes
         }
 
         // shared cues (tuned down so corrals of Rad/Mosaic largos are never overly loud)
-        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.18f, 13f, "radslime_aura_03");
+        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.18f, 26f, "radslime_aura_03");
         public static SECTR_AudioCue QuantumWarp => Cue("quantumWarp", false, 0.9f, 40f, "quantumslime_warp_01", "quantumslime_warp_05");
         public static SECTR_AudioCue QuantumGhost => Cue("quantumGhost", false, 0.6f, 25f, "quantumslime_idle_07");
         public static SECTR_AudioCue QuantumGhostPop => Cue("quantumGhostPop", false, 0.6f, 25f, "quantumslime_despawn_03b");

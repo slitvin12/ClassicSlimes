@@ -82,7 +82,7 @@ namespace ClassicSlimes
             if (c.Appearance != null)
             {
                 var p = c.Appearance._colorPalette;
-                p.Top = top; p.Middle = mid; p.Bottom = bottom;
+                p.Top = top; p.Middle = mid; p.Bottom = bottom; p.Ammo = mid;
                 c.Appearance._colorPalette = p; c.Appearance.ColorPaletteNew = p;
                 c.Appearance._splatColor = mid; c.Appearance.SetSplatColor();
             }
@@ -162,14 +162,14 @@ namespace ClassicSlimes
         /// original look, rock spikes turn stone grey.
         /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
-        static void Paint(CottonLibrary.Forge.LargoBuild c, Color top, Color mid, Color bottom, float identity)
+        static void Paint(CottonLibrary.Forge.LargoBuild c, Color top, Color mid, Color bottom, float identity, Material bodyOverride = null)
         {
-            var body = c.BodyMaterial;
+            var body = bodyOverride ?? c.BodyMaterial;
             if (body != null) { body.Palette(top, mid, bottom); EffectColors(body, top, mid, bottom); }
             if (c.Appearance != null)
             {
                 var p = c.Appearance._colorPalette;
-                p.Top = top; p.Middle = mid; p.Bottom = bottom;
+                p.Top = top; p.Middle = mid; p.Bottom = bottom; p.Ammo = mid;
                 c.Appearance._colorPalette = p; c.Appearance.ColorPaletteNew = p;
                 c.Appearance._splatColor = mid; c.Appearance.SetSplatColor();
             }
@@ -228,10 +228,11 @@ namespace ClassicSlimes
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void RadBuild(CottonLibrary.Forge.LargoBuild c)
         {
-            Visuals.RadLargoSurface(c.BodyMaterial, c.Has("Phosphor"));
-            ApplyRadFace(c);
             if (c.IsRadiant || c.Largo == null) return;
-            if (c.Has("Pink") || c.Has("Boom") || c.Has("Phosphor") || c.Has("Honey") || c.Has("Quantum")) return;
+            Visuals.RadLargoSurface(c.BodyMaterial, c.Has("Phosphor"));
+            if (!c.Has("Quantum") && !c.Has("Mosaic")) ApplyRadFace(c);
+            if (c.Has("Pink") || c.Has("Boom") || c.Has("Phosphor") || c.Has("Honey") || c.Has("Quantum")
+                || c.Has("Tabby") || c.Has("Rock") || c.Has("Ringtail") || c.Has("Mosaic")) return;
             Paint(c, RadTop, RadMid, RadBottom, 0.12f);
         }
 
@@ -254,12 +255,34 @@ namespace ClassicSlimes
         static void QuantumBuild(CottonLibrary.Forge.LargoBuild c)
         {
             if (c.IsRadiant || c.Largo == null || c.BodyMaterial == null) return;
+            var bodyMat = c.BodyMaterial;
+            if (bodyMat.shader == null || !bodyMat.shader.name.StartsWith("SR/AMP/Slime/Body"))
+            {
+                var rep = Mat.Clone(c.Largo.name + "_Body", "slimePinkBase");
+                if (rep != null)
+                {
+                    for (int i = 0; i < c.Structures.Count; i++)
+                    {
+                        var st = c.Structures[i];
+                        if (st?.Element == null || st.Element.Type != EType.BODY) continue;
+                        var dm = st.DefaultMaterials;
+                        if (dm != null && dm.Length > 0)
+                        {
+                            var arr = new Material[dm.Length];
+                            for (int k = 0; k < dm.Length; k++) arr[k] = k == 0 ? rep : dm[k];
+                            var copySt = new SlimeAppearanceStructure(st) { DefaultMaterials = Gc.Array(arr) };
+                            c.Structures[i] = copySt;
+                        }
+                    }
+                    bodyMat = rep;
+                }
+            }
             if (c.Has("Boom"))
             {
                 // SR1: the red cracked Boom body with golden cracks and a lighter red spiral.
-                Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), BoomTop, BoomMid, BoomBottom);
-                c.BodyMaterial.Col("_CrackColor", new Color(1f, 0.86f, 0.12f));
-                Visuals.Mats[c.Largo.name] = Mat.Track(c.BodyMaterial);
+                Visuals.QuantumSurface(bodyMat, BodyMesh(c), BoomTop, BoomMid, BoomBottom);
+                bodyMat.Col("_CrackColor", new Color(1f, 0.86f, 0.12f));
+                Visuals.Mats[c.Largo.name] = Mat.Track(bodyMat);
                 ClassicSlimesMod.Log.Msg($"[classic look] {c.Largo.name}: red body, golden cracks, SR1 spiral");
                 return;
             }
@@ -267,11 +290,11 @@ namespace ClassicSlimes
             if (c.Has("Pink")) { top = PinkTop; mid = PinkMid; bottom = PinkBottom; }
             else if (c.Has("Rad")) { top = LimeTop; mid = LimeMid; bottom = LimeBottom; }
             // the swirl replaces the body's colour mask: ringtail ears and tail (on the body material) keep the rings
-            var rings = Visuals.RingMarked(c.BodyMaterial)
-                ? new Material(c.BodyMaterial) { name = c.BodyMaterial.name + "_rings", hideFlags = HideFlags.DontUnloadUnusedAsset }
+            var rings = Visuals.RingMarked(bodyMat)
+                ? new Material(bodyMat) { name = bodyMat.name + "_rings", hideFlags = HideFlags.DontUnloadUnusedAsset }
                 : null;
-            Visuals.QuantumSurface(c.BodyMaterial, BodyMesh(c), top, mid, bottom);
-            Paint(c, top, mid, bottom, 0.12f);
+            Visuals.QuantumSurface(bodyMat, BodyMesh(c), top, mid, bottom);
+            Paint(c, top, mid, bottom, 0.12f, bodyMat);
             if (rings != null) KeepRings(c, rings, top, mid, bottom);
         }
 
@@ -332,7 +355,7 @@ namespace ClassicSlimes
             CottonLibrary.Forge.LargoStyle.Of("Quantum").Body(Low).Face(Low).Colors(3f).KeepOwnColors("*").OnBuild(QuantumBuild);
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Pink").Body("Pink").ColorsOf("Pink");
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Boom").Body("Boom").ColorsOf("Boom");
-            CottonLibrary.Forge.LargoRecipe.For("Quantum", "Mosaic").ColorsOf("Quantum");
+            CottonLibrary.Forge.LargoRecipe.For("Quantum", "Mosaic").Body("Pink").ColorsOf("Quantum");
             // Mosaic: the partner's body and colours (SR1: a pink, red, amber ... mosaic, not a blue blend); MosaicLargo turns
             // the body AND its parts into coated, shimmering glass tiles. "Second" = the other parent's palette.
             CottonLibrary.Forge.LargoStyle.Of("Mosaic").Body(Low).Face(Low).Colors(CottonLibrary.Forge.LargoColorMode.Second).KeepOwnColors("*");

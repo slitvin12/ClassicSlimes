@@ -62,6 +62,16 @@ namespace ClassicSlimes
 
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
+            if (sceneName == "MainMenuEnvironment")
+            {
+                try { PediaArt.ClearSession(); } catch { }
+                try { Gordos.ClearSession(); } catch { }
+                try { Spawns.ClearSession(); } catch { }
+                try { Foods.ClearSession(); } catch { }
+                try { GordoSnareBaitPatch.ClearSession(); } catch { }
+                try { Swirl.ClearSession(); } catch { }
+                try { Behaviours.ClearSession(); } catch { }
+            }
             try { Gordos.OnSceneLoaded(sceneName); }
             catch (Exception e) { Log.Error("Gordos.OnSceneLoaded failed: " + e); }
         }
@@ -77,6 +87,8 @@ namespace ClassicSlimes
                 catch (Exception e) { Log.Error("RefreshLargoDiets failed: " + e); }
             }
             try { Foods.EnsurePediaDirectorLinks(); } catch { }
+            try { PediaArt.RegisterPersistence(); } catch { }
+            try { Behaviours.AttachToLive(); } catch (Exception e) { Log.Error("AttachToLive failed: " + e); }
             if (Diag.Enabled) MelonCoroutines.Start(RuntimeDiag());
         }
 
@@ -100,7 +112,7 @@ namespace ClassicSlimes
             while (t < 8f) { t += Time.unscaledDeltaTime; yield return null; }
             try { Diag.Runtime(); } catch (Exception e) { Log.Error("Diag.Runtime failed: " + e); }
             try { DiagX.Run(); } catch (Exception e) { Log.Error("DiagX failed: " + e); }
-            try { Gallery.DumpProps(); Gallery.Show(); } catch (Exception e) { Log.Error("Gallery failed: " + e); }
+            try { Gallery.DumpProps(); } catch (Exception e) { Log.Error("Gallery.DumpProps failed: " + e); }
         }
     }
 }

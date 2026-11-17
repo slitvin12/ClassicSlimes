@@ -49,6 +49,22 @@ namespace ClassicSlimes
             var d = eat.SlimeDefinition;
             if (d != null && _byDef.TryGetValue(d.Pointer, out var add)) add(eat.gameObject);
         }
+
+        internal static void AttachToLive()
+        {
+            if (_byDef.Count == 0) return;
+            foreach (var e in Object.FindObjectsOfType<SlimeEat>(true))
+                if (e != null) try { OnSlimeAwake(e); } catch { }
+        }
+
+        internal static void ClearSession()
+        {
+            RadSlime.ClearSession();
+            QuantumSlime.ClearSession();
+            MosaicSlime.ClearSession();
+            QuicksilverSlime.ClearSession();
+            GlitchSlime.ClearSession();
+        }
     }
 
     [HarmonyPatch(typeof(SlimeEat), nameof(SlimeEat.Awake))]
@@ -73,7 +89,28 @@ namespace ClassicSlimes
         public static readonly List<RadSlime> All = new();
         public bool NoExpand;
 
-        void OnDestroy() => All.Remove(this);
+        IntPtr _absorberPlayerPtr;
+
+        internal static void ClearSession()
+        {
+            All.Clear();
+            _radSpeaker = null;
+            _radSpeakerFrame = -1;
+        }
+
+        void OnDisable()
+        {
+            Snd.SetPlaying(_loop, false);
+            Gfx.SetEmitting(_motes, false);
+            if (_aura != null) _aura.SetActive(false);
+            if (_core != null) _core.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            All.Remove(this);
+            if (_radSpeaker == this) _radSpeaker = null;
+        }
 
         static int _radSpeakerFrame = -1;
         static RadSlime _radSpeaker;
@@ -83,7 +120,7 @@ namespace ClassicSlimes
             {
                 _radSpeakerFrame = Time.frameCount;
                 _radSpeaker = null;
-                float best = 13f * 13f;
+                float best = float.MaxValue;
                 var pl = U.Player;
                 if (pl != null)
                 {
@@ -91,9 +128,12 @@ namespace ClassicSlimes
                     for (int i = All.Count - 1; i >= 0; i--)
                     {
                         var r = All[i];
-                        if (r == null || !r.isActiveAndEnabled || (r._vac != null && r._vac.IsHeld())) continue;
+                        if (r == null || !r.isActiveAndEnabled || r._factor <= 0.02f || (r._vac != null && r._vac.IsHeld())) continue;
+                        var ge = r.GetComponent<GordoEat>();
+                        if (ge != null && ge.GetEatenCount() == GordoEat.ALREADY_BURST_FLAG) continue;
+                        float maxRange = 13f * Mathf.Max(1f, r.transform.lossyScale.x * 0.5f);
                         float d2 = (r.transform.position - pp).sqrMagnitude;
-                        if (d2 < best) { best = d2; _radSpeaker = r; }
+                        if (d2 < maxRange * maxRange && d2 < best) { best = d2; _radSpeaker = r; }
                     }
                 }
             }
@@ -179,10 +219,12 @@ namespace ClassicSlimes
             if (_rippleFrame == Time.frameCount) return;
             _rippleFrame = Time.frameCount;
             if (Visuals.DomeStyle != 0) return;
-            var m = Visuals.RadDomeMat;
-            if (m == null || !m.HasProperty("_NormalMap")) return;
             float t = Time.time;
-            m.SetTextureOffset("_NormalMap", new Vector2(t * Visuals.RippleSpeed.x, t * Visuals.RippleSpeed.y));
+            var ofs = new Vector2(t * Visuals.RippleSpeed.x, t * Visuals.RippleSpeed.y);
+            var m = Visuals.RadDomeMat;
+            if (m != null && m.HasProperty("_NormalMap")) m.SetTextureOffset("_NormalMap", ofs);
+            var lm = Visuals.LargoDome0();
+            if (lm != null && lm != m && lm.HasProperty("_NormalMap")) lm.SetTextureOffset("_NormalMap", ofs);
         }
 
         /// <summary>Dev / tests: start the SR1 expansion (x1.5 for 3 + 10 s) now.</summary>
@@ -195,10 +237,15 @@ namespace ClassicSlimes
             ? Visuals.Sphere("RadCore", transform, new Vector3(0f, 0.5f, 0f), AuraScale * CoreRatio, Visuals.RadCoreMat)
             : null;
 
+        GordoEat _gordo;
+        bool _gordoChecked;
+
         void Update()
         {
             float dt = Time.deltaTime;
-            bool calmed = _calm != null && _calm.IsCalmed();
+            if (!_gordoChecked) { _gordoChecked = true; _gordo = GetComponent<GordoEat>(); }
+            bool burstedGordo = _gordo != null && _gordo.GetEatenCount() == GordoEat.ALREADY_BURST_FLAG;
+            bool calmed = burstedGordo || (_calm != null && _calm.IsCalmed());
             bool held = _vac != null && _vac.IsHeld();
             if (calmed) _nextExpand += dt;
             else if (!NoExpand && Time.time >= _nextExpand && Time.time >= _expandedUntil)
@@ -207,11 +254,11 @@ namespace ClassicSlimes
                 _nextExpand = _expandedUntil + Delay();
                 if (_motes != null && !held) { try { _motes.Emit(14); } catch { } }   // puff of radiation as it swells
             }
-            float target = calmed ? 0f : (Time.time < _expandedUntil ? ExpandFactor : 1f);
+            float target = burstedGordo ? 0f : calmed ? 0f : (Time.time < _expandedUntil ? ExpandFactor : 1f);
             float rate = (target < 1f || _factor < 1f) ? 1f / CalmingTime : (ExpandFactor - 1f) / ExpandingTime;
-            _factor = Mathf.MoveTowards(_factor, target, rate * dt);
+            _factor = burstedGordo ? 0f : Mathf.MoveTowards(_factor, target, rate * dt);
 
-            bool show = !held && _factor > 0.02f;
+            bool show = !burstedGordo && !held && _factor > 0.02f;
             // slow "breathing" of the aura (per slime phase), on top of the SR1 expansion
             float pulse = 1f + 0.035f * Mathf.Sin((Time.time + _phase) * 2.4f);
             ScrollRipples();
@@ -220,14 +267,20 @@ namespace ClassicSlimes
                 if (_aura.activeSelf != show) _aura.SetActive(show);
                 if (show)
                 {
-                    // jelly wobble: the three axes swell and shrink out of step, so the dome never sits still
-                    float w = Time.time + _phase * 3f;
-                    var jelly = new Vector3(1f + 0.05f * Mathf.Sin(w * 2.1f), 1f + 0.055f * Mathf.Sin(w * 2.7f + 1.1f), 1f + 0.05f * Mathf.Sin(w * 1.75f + 2.3f));
-                    _aura.transform.localScale = jelly * (AuraScale * _factor * pulse);
-                    // slow spin + sway: the refraction ripples of the glass dome crawl like SR1's heat haze
-                    float t = Time.time + _phase * 7f;
-                    if (!Visuals.DomeIsBillboard(Visuals.DomeStyle))
+                    if (Visuals.DomeIsBillboard(Visuals.DomeStyle))
+                    {
+                        _aura.transform.localScale = Vector3.one * (AuraScale * _factor * pulse);
+                    }
+                    else
+                    {
+                        // jelly wobble: the three axes swell and shrink out of step, so the dome never sits still
+                        float w = Time.time + _phase * 3f;
+                        var jelly = new Vector3(1f + 0.05f * Mathf.Sin(w * 2.1f), 1f + 0.055f * Mathf.Sin(w * 2.7f + 1.1f), 1f + 0.05f * Mathf.Sin(w * 1.75f + 2.3f));
+                        _aura.transform.localScale = jelly * (AuraScale * _factor * pulse);
+                        // slow spin + sway: the refraction ripples of the glass dome crawl like SR1's heat haze
+                        float t = Time.time + _phase * 7f;
                         _aura.transform.localRotation = Quaternion.Euler(14f * Mathf.Sin(t * 0.37f), t * Visuals.DomeSpin, 10f * Mathf.Sin(t * 0.29f + 1.3f));
+                    }
                 }
             }
             if (_core != null)
@@ -238,20 +291,34 @@ namespace ClassicSlimes
             Gfx.SetEmitting(_motes, show);
             Snd.SetPlaying(_loop, show && IsAudioLeader(this));
 
-            if (!show || !Cfg.RadAuraDamagesPlayer.Value) return;
+            if (dt <= 0f || !show || !Cfg.RadAuraDamagesPlayer.Value) return;
             // AuraScale is the DIAMETER of the (unit-diameter) aura sphere: irradiate only inside what is drawn
             // (it used to be the radius -> the player got rads up to 3.6 m away from a 1.6 m aura)
             float radius = 0.5f * AuraScale * _factor * transform.lossyScale.x;
             var center = transform.position + Vector3.up * (0.5f * transform.lossyScale.y);
             if (U.DistToPlayer(center) > radius + 0.35f) return;
-            if (_absorber == null)
+            var p = U.Player;
+            if (p != null && p.Pointer != _absorberPlayerPtr)
             {
-                var p = U.Player;
-                if (p != null) _absorber = p.GetComponent<PlayerRadAbsorber>() ?? p.GetComponentInChildren<PlayerRadAbsorber>();
+                _absorberPlayerPtr = p.Pointer;
+                _absorber = p.GetComponent<PlayerRadAbsorber>() ?? p.GetComponentInChildren<PlayerRadAbsorber>();
             }
             RadHud.LastExposure = Time.time;
             if (_absorber != null) _absorber.Absorb(gameObject, Cfg.RadPerSecond.Value * dt);
-            else if (Time.time > _fallbackTick) { _fallbackTick = Time.time + 2f; Dmg.Player(Cfg.RadDamagePerTick.Value, gameObject, "RadAbsorb", "SlimeAttack"); }
+            else
+            {
+                var ps = SceneContext.Instance != null ? SceneContext.Instance.PlayerState : null;
+                if (ps != null)
+                {
+                    int over = ps.AddRads(Cfg.RadPerSecond.Value * dt);
+                    if ((over > 0 || ps.GetCurrRad() >= 100) && Time.time > _fallbackTick)
+                    {
+                        _fallbackTick = Time.time + 2f;
+                        Dmg.Player(Cfg.RadDamagePerTick.Value, gameObject, "RadAbsorb", "SlimeAttack");
+                    }
+                }
+                else if (Time.time > _fallbackTick) { _fallbackTick = Time.time + 2f; Dmg.Player(Cfg.RadDamagePerTick.Value, gameObject, "RadAbsorb", "SlimeAttack"); }
+            }
         }
     }
 
@@ -274,14 +341,18 @@ namespace ClassicSlimes
         [Il2CppInterop.Runtime.Attributes.HideFromIl2Cpp] public JellyRig Jelly => _jelly;
         public string JellyInfo() => _jelly.Ok ? _jelly.Info() : $"jelly off (tried {_jellyTried})";
 
+        bool _everBound;
+
         void OnEnable() { _born = Time.time; }
 
         void LateUpdate()
         {
             if (!_jellyTried)
             {
-                if (Time.time - _born < 0.3f || !Cfg.QuantumJelly.Value) return;
+                if ((!_everBound && Time.time - _born < 0.3f) || !Cfg.QuantumJelly.Value) return;
                 _jellyTried = true;
+                _everBound = true;
+                if (_spiral == null && Cfg.QuantumJelly.Value) try { MakeSpiral(null, false); } catch { }
                 try { _jelly.Init(transform, _spiralBody != null ? _spiralBody : JellyBody()); }
                 catch (Exception e) { ClassicSlimesMod.Log.Warning("Quantum jelly: " + e.Message); }
                 return;
@@ -373,12 +444,19 @@ namespace ClassicSlimes
 
         float PhaseDelay() => Mathf.Lerp(14f, 4f, U.Agitation(_emo)) * U.Rand(0.7f, 1.3f);
 
+        internal static void ClearSession()
+        {
+            Walls.Clear();
+            WallSet.Clear();
+            _wallsAt = -999f;
+        }
+
         Material HoloInstance()
         {
             if (_holoMat != null) return _holoMat;
             var src = Visuals.HoloMat;
             if (src == null) return null;
-            _holoMat = new Material(src) { name = "QuantumHoloBody" };
+            _holoMat = new Material(src) { name = "QuantumHoloBody", hideFlags = HideFlags.DontUnloadUnusedAsset };
             _holoMat.SetTextureScale("_UnlitColorMap", new Vector2(1f, 1.5f));
             return _holoMat;
         }
@@ -407,7 +485,11 @@ namespace ClassicSlimes
                 }
                 var ofs = new Vector2(_holoOfs.x, _holoOfs.y - now * 0.6f);
                 if (_holoMat != null) _holoMat.SetTextureOffset("_UnlitColorMap", ofs);
-                if (_holo != null) { var hm = Visuals.HoloMat; if (hm != null) hm.SetTextureOffset("_UnlitColorMap", ofs); }
+                if (_holo != null && _holoMat != null)
+                {
+                    foreach (var r in _holo.GetComponentsInChildren<Renderer>(true))
+                        if (r != null && r.sharedMaterial != _holoMat) r.sharedMaterial = _holoMat;
+                }
                 return;
             }
             if (_nextPhase <= 0f) { _nextPhase = now + U.Rand(3f, 10f); _nextGlitch = now + U.Rand(2f, 5f); }
@@ -453,7 +535,7 @@ namespace ClassicSlimes
                     else if (sh.name.Contains("Slime/Face")) face = true;
                 }
                 if (idx.Count > 0) _swapped.Add(new Swap { R = r, Idx = idx.ToArray(), Orig = orig });
-                else if (face) _faces.Add(r);
+                else if (face || r.name == "MosaicElasticGlass" || r.name == "MosaicSlimeFacets") _faces.Add(r);
             }
             if (_swapped.Count == 0)
             {
@@ -480,12 +562,14 @@ namespace ClassicSlimes
             {
                 if (s.R == null) continue;
                 var mats = s.R.sharedMaterials;
-                foreach (var i in s.Idx) if (i < mats.Length) mats[i] = off ? _holoMat : s.Orig[i];
+                foreach (var i in s.Idx)
+                    if (i < mats.Length && (off || mats[i] == _holoMat))
+                        mats[i] = off ? _holoMat : s.Orig[i];
                 s.R.sharedMaterials = mats;
             }
             foreach (var r in _hidden) if (r != null) r.enabled = !off;
             if (_spiral != null) _spiral.SetActive(!off);   // the hologram has no spiral inside
-            if (!off) SetFace(true);
+            SetFace(!off);
         }
 
         void SetFace(bool on)
@@ -562,6 +646,8 @@ namespace ClassicSlimes
         void OnDisable()
         {
             if (_phaseEnd > 0f) EndPhase();
+            try { RestoreWalls(); } catch { }
+            ClearGhosts(false);
             _jelly.Restore();
             _jellyTried = false;
         }
@@ -591,6 +677,7 @@ namespace ClassicSlimes
 
         static void RefreshWalls()
         {
+            if (Walls.Count > 0 && Walls[0] == null) _wallsAt = -999f;
             if (Time.time - _wallsAt < 10f) return;
             _wallsAt = Time.time;
             Walls.Clear(); WallSet.Clear();
@@ -601,7 +688,7 @@ namespace ClassicSlimes
                 {
                     if (root == null) continue;
                     foreach (var c in root.GetComponentsInChildren<Collider>(true))
-                        if (c != null && !c.isTrigger && WallSet.Add(c.Pointer)) Walls.Add(c);
+                        if (c != null && !c.isTrigger && c.enabled && c.gameObject.activeInHierarchy && WallSet.Add(c.Pointer)) Walls.Add(c);
                 }
             }
         }
@@ -672,8 +759,8 @@ namespace ClassicSlimes
 
         bool InsideIgnoredWall()
         {
-            float r = 0.45f * transform.lossyScale.x;
-            foreach (var c in Physics.OverlapSphere(transform.position + Vector3.up * r, r, ~0, QueryTriggerInteraction.Ignore))
+            float r = 0.55f * transform.lossyScale.x;
+            foreach (var c in Physics.OverlapSphere(transform.position, r, ~0, QueryTriggerInteraction.Ignore))
                 if (c != null && _ignoredSet.Contains(c.Pointer)) return true;
             return false;
         }
@@ -744,8 +831,9 @@ namespace ClassicSlimes
 
         void TeleportTo(QuantumGhost g)
         {
-            var from = transform.position + Vector3.up * 0.5f;
-            var to = g.transform.position + Vector3.up * 0.05f;
+            float s = Mathf.Max(0.3f, transform.lossyScale.x);
+            var from = transform.position + Vector3.up * (0.5f * s);
+            var to = g.transform.position + Vector3.up * (0.5f * s + 0.05f);
             Fx.Play("FX Despawn", from);
             Snd.Play(Snd.QuantumWarp, from);
             if (_rb != null) { _rb.position = to; if (!_rb.isKinematic) _rb.linearVelocity = Vector3.zero; }
@@ -860,6 +948,13 @@ namespace ClassicSlimes
         public static readonly List<MosaicSlime> All = new();
         static int _mosaicSpeakerFrame = -1;
         static MosaicSlime _mosaicSpeaker;
+
+        internal static void ClearSession()
+        {
+            All.Clear();
+            _mosaicSpeaker = null;
+            _mosaicSpeakerFrame = -1;
+        }
         static bool IsAudioLeader(MosaicSlime me)
         {
             if (Time.frameCount != _mosaicSpeakerFrame)
@@ -981,13 +1076,18 @@ namespace ClassicSlimes
         {
             var cols = Physics.OverlapSphere(transform.position, 9f, U.SlimeMask, QueryTriggerInteraction.Ignore);
             var seen = new HashSet<IntPtr>();
+            var eye = transform.position + Vector3.up * 0.5f;
             foreach (var c in cols)
             {
                 var rb = c != null ? c.attachedRigidbody : null;
                 if (rb == null || rb.isKinematic || rb.gameObject == gameObject || !seen.Add(rb.Pointer)) continue;
-                if (rb.GetComponent<SlimeEat>() == null || rb.GetComponent<MosaicSlime>() != null) continue;
+                var eat = rb.GetComponent<SlimeEat>();
+                if (eat == null || eat.SlimeDefinition == null || eat.SlimeDefinition.name.IndexOf("tarr", StringComparison.OrdinalIgnoreCase) >= 0 || rb.GetComponent<MosaicSlime>() != null) continue;
+                var sj = rb.GetComponent<SafeJointReference>();
+                if ((sj != null && sj.Joint != null) || rb.GetComponent<Joint>() != null) continue;
                 var v = rb.GetComponent<Vacuumable>();
                 if (v != null && v.IsHeld()) continue;
+                if (Physics.Linecast(eye, rb.position + Vector3.up * 0.5f, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
                 var dir = transform.position - rb.position;
                 dir.y = 0f;
                 float d = dir.magnitude;
@@ -1006,7 +1106,7 @@ namespace ClassicSlimes
         ElasticGlassRig _glass;
         readonly JellyRig _jelly = new();
         float _born;
-        bool _jellyTried;
+        bool _jellyTried, _everBound;
         [Il2CppInterop.Runtime.Attributes.HideFromIl2Cpp] public JellyRig Jelly => _jelly;
 
         void OnEnable() { _born = Time.time; }
@@ -1015,7 +1115,8 @@ namespace ClassicSlimes
         {
             if (Visuals.MosaicGlassMode == 3)
             {
-                if (Time.time - _born < 0.3f) return;
+                if (!_everBound && Time.time - _born < 0.3f) return;
+                _everBound = true;
                 try { (_glass ??= new ElasticGlassRig(transform)).Sync(); }
                 catch (Exception e) { ClassicSlimesMod.Log.Warning("Mosaic glass bind: " + e.Message); }
                 return;
@@ -1023,8 +1124,9 @@ namespace ClassicSlimes
             if (_glass != null) { _glass.Dispose(); _glass = null; }
             if (!_jellyTried)
             {
-                if (Visuals.MosaicGlassMode != 0 || Time.time - _born < 0.3f || !Cfg.MosaicJelly.Value) return;
+                if (Visuals.MosaicGlassMode != 0 || (!_everBound && Time.time - _born < 0.3f) || !Cfg.MosaicJelly.Value) return;
                 _jellyTried = true;
+                _everBound = true;
                 try { _jelly.Init(transform, JellyBody()); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Mosaic jelly: " + e.Message); }
                 return;
             }
@@ -1049,13 +1151,20 @@ namespace ClassicSlimes
         void OnDisable()
         {
             if (_glass != null) { _glass.Dispose(); _glass = null; }
+            foreach (var r in GetComponentsInChildren<Renderer>(true)) SlimeFacets.RestoreTiles(r);
             _jelly.Restore();
             _jellyTried = false;
+            Snd.SetPlaying(_loop, false);
+            Gfx.SetEmitting(_stars, false);
+            Flares(false);
+            foreach (var g in _glints) if (g != null) Object.Destroy(g.gameObject);
+            _glints.Clear();
         }
 
         void OnDestroy()
         {
             All.Remove(this);
+            if (_mosaicSpeaker == this) _mosaicSpeaker = null;
             if (_glass != null) { _glass.Dispose(); _glass = null; }
             foreach (var g in _glints) if (g != null) Object.Destroy(g.gameObject);
             _glints.Clear();
@@ -1083,10 +1192,14 @@ namespace ClassicSlimes
 
         void Update()
         {
+            if (Owner == null || !Owner.isActiveAndEnabled) { Destroy(gameObject); return; }
             var td = SceneContext.Instance != null ? SceneContext.Instance.TimeDirector : null;
             if (td == null) return;
             float t = Time.time + _phase;
-            _spin += Time.deltaTime * (_state == State.Suspended ? 40f : 160f);
+            float spinSpeed = _state == State.Suspended ? 40f : 160f;
+            _spin += Time.deltaTime * spinSpeed;
+            var bb = _core != null ? _core.GetComponent<Billboard>() : null;
+            if (bb != null) bb.Spin = spinSpeed;
             float pulse = _state == State.Suspended ? 1f + Mathf.Sin(t * 2f) * 0.12f : 1.25f + Mathf.Sin(t * 9f) * 0.25f;
             if (_core != null) _core.transform.localScale = Vector3.one * 1.1f * pulse;
 
@@ -1183,9 +1296,26 @@ namespace ClassicSlimes
         /// <summary>Dev: pretend the vacpack is sucking along the camera's view until then.</summary>
         public static float DevAimUntil;
 
+        internal static void ClearSession()
+        {
+            NoHop.Clear();
+            _plAt = -1f;
+            _vacItem = null;
+        }
+
         bool _seated;
         float _seatGraceUntil;
-        public bool IsSeated => _seated || Time.time < _seatGraceUntil || GetComponent<SafeJointReference>() != null || GetComponent<Joint>() != null;
+        public bool IsSeated
+        {
+            get
+            {
+                var sj = GetComponent<SafeJointReference>();
+                var j = GetComponent<Joint>();
+                bool hasJoint = (sj != null && sj.Joint != null) || j != null;
+                if (_seated && !hasJoint && Time.time >= _seatGraceUntil) _seated = false;
+                return _seated || hasJoint || Time.time < _seatGraceUntil;
+            }
+        }
         public void SetSeated(bool on)
         {
             _seated = on;
@@ -1196,7 +1326,7 @@ namespace ClassicSlimes
                 if (_rb != null && !_rb.isKinematic) _rb.linearVelocity = Vector3.zero;
             }
         }
-        public void EnterSeatGrace(float sec = 0.8f)
+        public void EnterSeatGrace(float sec = 0.2f)
         {
             _seatGraceUntil = Time.time + sec;
             _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _zigAt = -1f;
@@ -1265,7 +1395,8 @@ namespace ClassicSlimes
             if (Physics.SphereCast(o, 0.25f * s, dir, out wall, look, U.GroundMask, QueryTriggerInteraction.Ignore) && wall.normal.y < 0.55f) return Ahead.Wall;
             var p = o + dir * look;
             if (!Physics.Raycast(p, Vector3.down, out var g, maxDrop * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return Ahead.Drop;
-            if (Physics.Raycast(p, Vector3.down, g.distance, WaterMask, QueryTriggerInteraction.Collide)) return Ahead.Drop;   // water before the ground
+            if (Physics.Raycast(p, Vector3.down, out var wHit, g.distance, WaterMask, QueryTriggerInteraction.Collide) && (g.distance - wHit.distance > 0.65f * s))
+                return Ahead.Drop;   // deep water before the ground; wade through shallow puddles
             return Ahead.Clear;
         }
 
@@ -1484,6 +1615,7 @@ namespace ClassicSlimes
             float h = top.point.y - baseY;
             if (top.normal.y < 0.6f || h < 0.5f * s || h > maxH) return false;
             if (Physics.CheckSphere(top.point + Vector3.up * (0.75f * s), 0.4f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;   // no room up there
+            if (Physics.Linecast(new Vector3(pos.x, top.point.y + 0.75f * s, pos.z), top.point + Vector3.up * (0.75f * s), U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
             if (Physics.Raycast(top.point + Vector3.up * 0.5f, Vector3.down, 1f, WaterMask, QueryTriggerInteraction.Collide)) return false;
             _climbTop = top.point;
             _climbDir = wallDir;
@@ -1892,12 +2024,19 @@ namespace ClassicSlimes
             }
         }
 
+        internal static void ClearSession()
+        {
+            try { if (_flashOn && Visuals.Mats.TryGetValue("Glitch", out var m) && m != null) Flash(m, false); } catch { }
+            _flashOn = false;
+            All.Clear();
+        }
+
         public static void ReapplyAll()
         {
             foreach (var g in All.ToArray())
             {
                 if (g == null || g._app == null) continue;
-                g._own = g._app.Appearance;
+                if (!g._disguised) g._own = g._app.Appearance;
                 if (g._own != null && !g._disguised) g.Apply(g._own);
             }
         }
@@ -1910,10 +2049,13 @@ namespace ClassicSlimes
 
         void Update()
         {
-            AnimateMask();
+            try { AnimateMask(); } catch { }
+            if (_own == null && _app != null && !_disguised)
+                _own = _app.Appearance ?? SlimeFactory.Spec("Glitch")?.Def?.AppearancesDefault?[0];
             if (_app == null || _own == null) return;
             float now = Time.time;
             bool held = _vac != null && _vac.IsHeld();
+            bool calm = now < _calmUntil || (_calm != null && _calm.IsCalmed());
             bool show = !held && !_disguised && Time.frameCount > _blinkFrame + 1;   // no streak across a blink
             Gfx.SetEmitting(_pixels, show);
             Gfx.SetEmitting(_trail, show);
@@ -1921,7 +2063,7 @@ namespace ClassicSlimes
             Gfx.SetEmitting(_ribbon2, show);
             if (_ribbon != null) AnimateStrip();
             bool burst = Bursting;
-            if (burst && !_inBurst && !held && !_disguised && _pixels != null) _pixels.Emit(U.Rng.Next(3, 8));
+            if (!calm && burst && !_inBurst && !held && !_disguised && _pixels != null) _pixels.Emit(U.Rng.Next(3, 8));
             _inBurst = burst;
             if (held)
             {
@@ -1950,9 +2092,8 @@ namespace ClassicSlimes
             if (_rubberAt > 0f && now > _rubberAt)   // lag: snaps back to where it blinked from
             {
                 _rubberAt = -1f;
-                if (!_disguised) Jump(_rubberPos, false);
+                if (!_disguised && !launched && _rb != null && !_rb.isKinematic) Jump(_rubberPos, false);
             }
-            bool calm = now < _calmUntil || (_calm != null && _calm.IsCalmed());
             if (!Cfg.GlitchDisguise.Value || DevNoDisguise) { if (_disguised) Reveal(false); }
             else if (calm) { if (_disguised) Reveal(true); }
             else if (!_disguised) { if (now > _nextDisguise) Disguise(); }
@@ -2085,6 +2226,7 @@ namespace ClassicSlimes
             float now = Time.time;
             _calmUntil = now + 10f;
             _fleeUntil = 0f;
+            _fleePendingAt = -1f;
             _rubberAt = -1f;
             _nextDisguise = Mathf.Max(_nextDisguise, _calmUntil);
             if (_disguised) { Reveal(true); return; }
@@ -2124,7 +2266,7 @@ namespace ClassicSlimes
             Gfx.SetEmitting(_trail, false);
             Gfx.SetEmitting(_ribbon, false);
             Gfx.SetEmitting(_ribbon2, false);
-            to += Vector3.up * 0.05f;
+            to += Vector3.up * (0.5f * s + 0.05f);
             if (_rb != null) { _rb.position = to; if (!_rb.isKinematic) _rb.linearVelocity = Vector3.zero; }
             transform.position = to;
             _blinkFrame = Time.frameCount;

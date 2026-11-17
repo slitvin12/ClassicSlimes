@@ -516,7 +516,7 @@ namespace ClassicSlimes
 
         static void Track(Transform t, Rigidbody rb)
         {
-            var v = rb != null ? rb.velocity : Vector3.zero;
+            var v = rb != null ? rb.linearVelocity : Vector3.zero;
             string extra = "";
             var gl = t.GetComponent<GlitchSlime>(); if (gl != null && gl.Fleeing) extra += " FLEE";
             if (rb != null) extra += $" kin {rb.isKinematic} sleep {rb.IsSleeping()}";
@@ -572,7 +572,7 @@ namespace ClassicSlimes
                 if (Physics.Raycast(pos + Vector3.up * 5f, Vector3.down, out var hit, 20f, ~0, QueryTriggerInteraction.Ignore))
                     pos = hit.point + Vector3.up * 0.55f;
                 var rb = go.GetComponent<Rigidbody>();
-                if (rb != null) { if (!rb.isKinematic) rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
+                if (rb != null) { if (!rb.isKinematic) rb.linearVelocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
                 go.transform.position = pos;
                 go.transform.rotation = Quaternion.LookRotation(-fwd, Vector3.up);
             }
@@ -697,7 +697,7 @@ namespace ClassicSlimes
             var up = cam.transform.up;
             var pos = p + fwd * dist + up * dy;
             var rb = best.GetComponent<Rigidbody>();
-            if (rb != null) { if (!rb.isKinematic) rb.velocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
+            if (rb != null) { if (!rb.isKinematic) rb.linearVelocity = Vector3.zero; rb.isKinematic = true; _frozen.Add((rb, Time.time + seconds)); }
             best.transform.position = pos;
             best.transform.rotation = Quaternion.LookRotation(-fwd, up) * Quaternion.Euler(0f, yaw, 0f);
             L($"pose {def} at {pos}");
@@ -975,6 +975,8 @@ namespace ClassicSlimes
     [HarmonyPatch(typeof(DirectedSlimeSpawner), nameof(DirectedSlimeSpawner.OnActorSpawned))]
     static class SpawnLogPatch
     {
+        static bool Prepare() => Diag.Enabled;
+
         static void Postfix(DirectedSlimeSpawner __instance, GameObject spawnedObj, IdentifiableType id)
         {
             try { if (Diag.Enabled) DevCmd.NoteSpawn(__instance, spawnedObj, id); } catch { }

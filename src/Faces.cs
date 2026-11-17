@@ -121,6 +121,55 @@ namespace ClassicSlimes
             return f;
         }
 
+        static readonly List<Material> _exprPinned = new();
+
+        /// <summary>Clones a face and remaps each expression's eye/mouth material keyed by (sourcePointer, expression).</summary>
+        public static SlimeFace CloneByExpr(SlimeFace src, string name,
+            Func<SlimeFace.SlimeExpression, Material, Material> eyes,
+            Func<SlimeFace.SlimeExpression, Material, Material> mouth)
+        {
+            Init();
+            if (src == null) return null;
+            var f = Object.Instantiate(src);
+            f.name = name;
+            f.hideFlags |= HideFlags.HideAndDontSave;
+            var arr = Arr(f);
+            int n = Len(arr);
+            var ce = new Dictionary<(IntPtr, SlimeFace.SlimeExpression), Material>();
+            var cm = new Dictionary<(IntPtr, SlimeFace.SlimeExpression), Material>();
+            for (int i = 0; i < n; i++)
+            {
+                var e = Elem(arr, i);
+                var ex = (SlimeFace.SlimeExpression)(*(int*)(e + _offEx));
+                IntPtr pe = *(IntPtr*)(e + _offEyes);
+                if (pe != IntPtr.Zero && eyes != null)
+                {
+                    if (!ce.TryGetValue((pe, ex), out var me))
+                    {
+                        var se = M(pe);
+                        me = se != null ? eyes(ex, se) : null;
+                        if (me != null) { Protected.Add(me.Pointer); _exprPinned.Add(me); }
+                        ce[(pe, ex)] = me;
+                    }
+                    if (me != null) Set(arr, e + _offEyes, me);
+                }
+                IntPtr pm = *(IntPtr*)(e + _offMouth);
+                if (pm != IntPtr.Zero && mouth != null)
+                {
+                    if (!cm.TryGetValue((pm, ex), out var mm))
+                    {
+                        var sm = M(pm);
+                        mm = sm != null ? mouth(ex, sm) : null;
+                        if (mm != null) { Protected.Add(mm.Pointer); _exprPinned.Add(mm); }
+                        cm[(pm, ex)] = mm;
+                    }
+                    if (mm != null) Set(arr, e + _offMouth, mm);
+                }
+            }
+            f.UpdateCache();
+            return f;
+        }
+
         // ------------------------------------------------------------------ self-heal
         // Something in the game occasionally destroys cloned face materials (seen with mouthHappy clones); a destroyed
         // slot renders with the magenta error material. Every 2 s the registered faces are checked and dead slots are

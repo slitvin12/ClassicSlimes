@@ -13,8 +13,25 @@ namespace ClassicSlimes
 {
     public static class Diag
     {
-        public static string Dir => Path.Combine(MelonEnvironment.UserDataDirectory, "ClassicSlimes");
-        public static bool Enabled => Cfg.Diagnostics.Value || File.Exists(Path.Combine(Dir, "diag.enabled"));
+        public static readonly string Dir = Path.Combine(MelonEnvironment.UserDataDirectory, "ClassicSlimes");
+        static readonly string _diagFlagPath = Path.Combine(Dir, "diag.enabled");
+        static bool _hasDiagFlag;
+        static long _nextFlagCheck;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (Cfg.Diagnostics.Value) return true;
+                long now = Environment.TickCount64;
+                if (now >= _nextFlagCheck)
+                {
+                    _nextFlagCheck = now + 5000;
+                    _hasDiagFlag = File.Exists(_diagFlagPath);
+                }
+                return _hasDiagFlag;
+            }
+        }
 
         static string N(UnityEngine.Object o) => o == null ? "null" : o.name;
         static string TN(Il2CppSystem.Object o) { try { return o == null ? "null" : o.GetIl2CppType().Name; } catch { return "?"; } }

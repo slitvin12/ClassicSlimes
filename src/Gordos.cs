@@ -58,6 +58,12 @@ namespace ClassicSlimes
         static int _testN;
         const string TestPrefix = IdPrefix + "Test";
 
+        internal static void ClearSession()
+        {
+            _live.Clear();
+            _tests.Clear();
+        }
+
         static MelonLogger.Instance Log => ClassicSlimesMod.Log;
 
         public static bool IsClassicGordoType(IdentifiableType t)
@@ -129,7 +135,7 @@ namespace ClassicSlimes
                     var gr = obj.GetComponent<GordoRewards>();
                     if (ct != null && ct.prefab != null && gr != null)
                     {
-                        gr.RewardPrefabs = new Il2CppReferenceArray<GameObject>(new[] { ct.prefab });
+                        gr.RewardPrefabs = Gc.Array(new[] { ct.prefab });
                         crate = ct.prefab.name;
                     }
                 }
@@ -177,7 +183,7 @@ namespace ClassicSlimes
         static void Place(Spot sp, Scene scene)
         {
             if (!Types.TryGetValue(sp.Slime, out var type)) return;
-            if (_live.TryGetValue(sp.Id, out var old) && old != null) return;
+            if (_live.TryGetValue(sp.Id, out var old) && old != null && old.scene == scene) return;
             var go = Spawn(type, sp.Id, sp.Pos, sp.Yaw, scene);
             if (go == null) return;
             _live[sp.Id] = go;
@@ -187,7 +193,7 @@ namespace ClassicSlimes
             {
                 var gm = SceneContext.Instance.GameModel;
                 eaten = gm != null && gm.gordos.ContainsKey(sp.Id) ? gm.gordos[sp.Id].GordoEatenCount : eat.GetEatenCount();
-                if (eaten == GordoEat.ALREADY_BURST_FLAG && go.activeSelf) go.SetActive(false);
+                if (eaten == GordoEat.ALREADY_BURST_FLAG && go.activeInHierarchy) go.SetActive(false);
             }
             catch { }
             var par = go.transform.parent;
@@ -236,18 +242,58 @@ namespace ClassicSlimes
                 }
             }
             catch (Exception e) { Log.Warning("Gordo cell lookup: " + e.Message); }
-            if (best == null) return null;
-            var slimes = best.transform.Find("Slimes");
-            return slimes != null ? slimes : best.transform;
+            if (best != null)
+            {
+                var slimes = best.transform.Find("Slimes");
+                return slimes != null ? slimes : best.transform;
+            }
+            Il2CppMonomiPark.SlimeRancher.Regions.Region bestReg = null;
+            float bestDist = float.MaxValue;
+            try
+            {
+                foreach (var reg in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Regions.Region>())
+                {
+                    if (reg == null || reg.gameObject.scene != scene) continue;
+                    var rb = reg.Bounds;
+                    if (rb.Contains(pos)) { bestReg = reg; break; }
+                    float d = rb.SqrDistance(pos);
+                    if (d < bestDist) { bestDist = d; bestReg = reg; }
+                }
+            }
+            catch (Exception e) { Log.Warning("Gordo region fallback: " + e.Message); }
+            if (bestReg == null) return null;
+            var rSlimes = bestReg.transform.Find("Sector/Slimes") ?? bestReg.transform.Find("Sector") ?? bestReg.transform.Find("Slimes");
+            return rSlimes != null ? rSlimes : bestReg.transform;
         }
 
-        static void Extras(GameObject go, IdentifiableType type)
+        internal static void Extras(GameObject go, IdentifiableType type)
         {
-            var slime = Types.FirstOrDefault(kv => kv.Value.Pointer == type.Pointer).Key;
+            if (go == null || type == null) return;
+            var slime = Types.FirstOrDefault(kv => kv.Value != null && kv.Value.Pointer == type.Pointer).Key;
             try
             {
                 // SR1 gordoRad: the radiation aura of a rad slime, scaled with the gordo (SR1: radius 3.2 x gordo scale 4)
                 if (slime == "Rad" && go.GetComponent<RadSlime>() == null) go.AddComponent<RadSlime>().NoExpand = true;
+                else if (slime == "Quantum" && Cfg.QuantumJelly.Value && Find(go.transform, "QSpiral") == null)
+                {
+                    var bodyR = BodyRenderer(go);
+                    var sm = Visuals.QuantumSpiralMat;
+                    if (bodyR != null && sm != null)
+                    {
+                        var b = U.RootBounds(go.transform, bodyR);
+                        float h = b.size.y;
+                        if (h >= 0.2f)
+                        {
+                            var parent = JellyRig.VisRoot(go.transform, bodyR) ?? go.transform;
+                            var spiral = Gfx.MeshObj("QSpiral", parent, Spiral3D.Mesh, sm, Vector3.zero, 1f);
+                            var st = spiral.transform;
+                            st.position = go.transform.TransformPoint(b.center + QuantumSlime.SpiralOfs * h);
+                            st.localRotation = Quaternion.Inverse(parent.rotation) * go.transform.rotation;
+                            float rel = Mathf.Max(1e-4f, parent.lossyScale.x / Mathf.Max(1e-4f, go.transform.lossyScale.x));
+                            st.localScale = Vector3.one * (h * QuantumSlime.SpiralSize / rel);
+                        }
+                    }
+                }
             }
             catch (Exception e) { Log.Warning($"Gordo extras {slime}: {e.Message}"); }
         }
@@ -260,7 +306,7 @@ namespace ClassicSlimes
             return cam != null ? cam.transform.position : Vector3.zero;
         }
 
-        static bool InScene(GordoEat e) => e != null && e.gameObject.scene.IsValid() && e.gameObject.scene.name != "DontDestroyOnLoad";
+        internal static bool InScene(GordoEat e) => e != null && e.gameObject.scene.IsValid() && e.gameObject.scene.name != "DontDestroyOnLoad";
 
         static GordoEat Nearest(bool inactive = false)
         {
@@ -594,8 +640,8 @@ namespace ClassicSlimes
                 if (id != null && e._id != id) continue;
                 try
                 {
-                    e.SetEatenCount(0);
                     if (!e.gameObject.activeSelf) e.gameObject.SetActive(true);
+                    e.SetEatenCount(0);
                     e.GetComponent<GordoFaceAnimator>()?.SetDefaultState();
                     n++;
                 }

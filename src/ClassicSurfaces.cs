@@ -48,7 +48,7 @@ namespace ClassicSlimes
                 m.Kw("_BODYCOLORING_DEFAULT", false); m.Kw("_BODYCOLORING_MULTI", true); m.Flt("_BodyColoring", 1f);
                 m.Tx("_ColorMask", Res.Tex(MosaicMask, true) ?? Res.Tex("msk_mosaic", true));
                 m.Flt("_ColorMaskUV1", 0f);
-                m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero);
+                if (m.HasProperty("_ColorMask")) { m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero); }
                 m.Palette(Color.Lerp(new Color(0.08f, 0.20f, 0.48f), top, tint),
                     Color.Lerp(new Color(0.06f, 0.16f, 0.40f), mid, tint),
                     Color.Lerp(new Color(0.05f, 0.12f, 0.32f), bottom, tint));
@@ -171,13 +171,15 @@ namespace ClassicSlimes
                 else
                     m = Mat.Clone(src.name + "_MosaicNative", "slimePinkBase", "slimeRockBase");
                 if (m == null) continue;
-                // Sloomber's star mode is exclusive with MULTI; keep that parent's markings and add only tile bevels.
-                MosaicSurface(m, pal.Top, pal.Middle, pal.Bottom, tint, !m.IsKeywordEnabled("_BODYCOLORING_SLOOMBER"));
+                // Sloomber's star mode is exclusive with MULTI; Quantum's spiral mask should also remain intact.
+                bool hasSwirl = m.HasProperty("_ColorMask") && (m.GetTexture("_ColorMask")?.name?.IndexOf("quantumSwirl", StringComparison.OrdinalIgnoreCase) >= 0);
+                MosaicSurface(m, pal.Top, pal.Middle, pal.Bottom, tint, !m.IsKeywordEnabled("_BODYCOLORING_SLOOMBER") && !hasSwirl);
                 bodies[src.Pointer] = m;
             }
             var structures = new List<SlimeAppearanceStructure>();
             // ringtail ears and tail share the body: glass too, but with the ringtail rings instead of the body's tiles
             var ringed = new Dictionary<IntPtr, Material>();
+            var partCache = new Dictionary<IntPtr, Material>();
             int parts = 0;
             foreach (var s in source)
             {
@@ -205,7 +207,11 @@ namespace ClassicSlimes
                     if (bodies.TryGetValue(mk.Pointer, out var body)) { list.Add(body); changed = true; if (s.Element.Type != EType.BODY) parts++; continue; }
                     if (k == 0 && !bare && s.Element.Type != EType.BODY && !mk.name.Contains("_Mosaic"))
                     {
-                        var part = MosaicPart(mk, pal.Top, pal.Middle, pal.Bottom, tint);
+                        if (!partCache.TryGetValue(mk.Pointer, out var part))
+                        {
+                            part = MosaicPart(mk, pal.Top, pal.Middle, pal.Bottom, tint);
+                            partCache[mk.Pointer] = part;
+                        }
                         if (part != null) { list.Add(part); changed = true; parts++; continue; }
                     }
                     list.Add(mk);
@@ -276,13 +282,13 @@ namespace ClassicSlimes
             if (swirl != null)
             {
                 m.Tx("_ColorMask", swirl);
-                m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero);
+                if (m.HasProperty("_ColorMask")) { m.SetTextureScale("_ColorMask", Vector2.one); m.SetTextureOffset("_ColorMask", Vector2.zero); }
                 m.Flt("_ColorMaskUV1", set);
             }
             else
             {
                 m.Tx("_ColorMask", Res.Tex("msk_quantumSpiral", true, false) ?? Gfx.SwirlMask);
-                m.SetTextureScale("_ColorMask", Gfx.SwirlScale); m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset);
+                if (m.HasProperty("_ColorMask")) { m.SetTextureScale("_ColorMask", Gfx.SwirlScale); m.SetTextureOffset("_ColorMask", Gfx.SwirlOffset); }
                 m.Flt("_ColorMaskUV1", 0f);
             }
             m.Col("_RedTopColor", Color.Lerp(top, Color.white, QuantumBandLift));

@@ -36,7 +36,7 @@ namespace ClassicSlimes
             for (int i = 0; i < n; i++)
             {
                 var pos = cam.transform.position + fwd * dist + right * ((i - (n - 1) * 0.5f) * 1.5f);
-                if (Physics.Raycast(pos + Vector3.up * 3f, Vector3.down, out var hit, 20f, ~0, QueryTriggerInteraction.Ignore)) pos = hit.point + Vector3.up * 0.6f;
+                if (Physics.Raycast(pos + Vector3.up * 3f, Vector3.down, out var hit, 20f, U.GroundMask, QueryTriggerInteraction.Ignore)) pos = hit.point + Vector3.up * 0.6f;
                 var go = Foods.SpawnActor(t, pos, Quaternion.LookRotation(-fwd, Vector3.up));
                 if (go != null) { Spawned.Add(go); made++; }
             }

@@ -82,6 +82,21 @@ namespace ClassicSlimes
             return want;
         }
 
+        /// <summary>Restores the tiled material if a body or largo surface had been swapped to smooth.</summary>
+        internal static void RestoreTiles(Renderer r)
+        {
+            if (r == null) return;
+            var mats = r.sharedMaterials;
+            if (mats == null || mats.Length == 0 || mats[0] == null) return;
+            var m = mats[0];
+            Material orig = null;
+            if (GordoFacets.SmoothMat != null && m == GordoFacets.SmoothMat) orig = GordoFacets.Tiles;
+            else if (TileOriginals.TryGetValue(m.Pointer, out var t) && t != null) orig = t;
+            if (orig == null || orig == m) return;
+            mats[0] = orig;
+            r.sharedMaterials = mats;
+        }
+
         static readonly Dictionary<IntPtr, Material> SmoothCopies = new(), TileOriginals = new();
 
         /// <summary>
@@ -206,7 +221,7 @@ namespace ClassicSlimes
                 {
                     try { f = Build(body, rest, restNormals, alpha, MeshToRoot(root, source, skin, body)); }
                     catch (Exception e) { f = null; Log.Warning($"Mosaic slime facets {body.name}: {e}"); }
-                    Fits[id] = f;
+                    if (f != null) Fits[id] = f;
                 }
                 return f != null ? new Shell(f) : null;
             }
@@ -223,7 +238,7 @@ namespace ClassicSlimes
                     int k = j * 3;
                     V a = body[tri[k]], e1 = body[tri[k + 1]] - a, e2 = body[tri[k + 2]] - a, cr = V.Cross(e1, e2);
                     float l = cr.Length();
-                    if (l < 1e-12f) continue;
+                    if (l < 1e-12f) { pos[j] = a; nrm[j] = V.UnitY; continue; }
                     V nf = cr / l, ns = cr / MathF.Sqrt(l), t1 = Unit(e1), t2 = V.Cross(nf, t1);
                     var o = f.Off[j];
                     pos[j] = a + e1 * o.X + e2 * o.Y + ns * o.Z;
@@ -327,9 +342,11 @@ namespace ClassicSlimes
             {
                 V lo = new(float.MaxValue), hi = new(float.MinValue);
                 foreach (var v in sv) { lo = V.Min(lo, v); hi = V.Max(hi, v); }
-                s1 = (hi - lo) / (1f + Margin); c1 = (lo + hi) * 0.5f;
+                s1 = (hi - lo) / MathF.Max(1e-4f, 1f + Margin); c1 = (lo + hi) * 0.5f;
             }
-            V k = size / s1 * Scale, c2 = (min + max) * 0.5f;
+            s1 = new V(MathF.Max(1e-4f, s1.X), MathF.Max(1e-4f, s1.Y), MathF.Max(1e-4f, s1.Z));
+            V k = size / s1 * MathF.Max(1e-4f, Scale), c2 = (min + max) * 0.5f;
+            k = new V(MathF.Max(1e-4f, k.X), MathF.Max(1e-4f, k.Y), MathF.Max(1e-4f, k.Z));
             var snA = src.normals;
             var sn = snA != null && snA.Length == sv.Length ? MemoryMarshal.Cast<Vector3, V>(snA.AsSpan()).ToArray() : new V[sv.Length];
             int n = sv.Length;

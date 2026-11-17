@@ -4,7 +4,7 @@
 **Mosaic (мозаичный)**, **Quicksilver (ртутный)** и **Glitch (глитч)**. Ресурсы извлечены из файлов SR1
 (иконки, меши, текстуры, звуки, тексты EN/RU), механики заново реализованы по поведению SR1.
 
-> *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.x co-op support.
+> *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.0 / 2.1.0-rc4 co-op support.
 
 **Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.5 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
 
@@ -29,19 +29,18 @@
 
 ## Новое в 1.3.5
 
-- **Кооператив Lycoreia 2.x (и SR2MP).** Реализован рефлексивный мост `CoopCompat` без жёсткой зависимости от `Lycoreia.dll` / `Starlight.dll`:
-  - сбитые фазовые лимоны и акторы еды анонсируются в сеть (`CoopCompat.AnnounceSpawn`) и обрабатываются только лидером зоны (`IsSpawnAuthority`), чтобы не плодить дубли и не стирать чужие плоды у гостя;
-  - телепорты / выход из стен `Quantum` и притяжение / блики `Mosaic` выполняются только на стороне владельца физики актора (`IsLocallySimulated`);
-  - `Quicksilver` и `Glitch` выбирают ближайшего игрока среди локального и активных удалённых аватаров (`NearestPlayer`);
-  - награда за отладку `Glitch` выдаётся только при всасывании локальным вакпаком (`IsHeldByLocalVac`), исключая двойное начисление от репликации;
-  - уже лопнувшие гордо деактивируются по `ALREADY_BURST_FLAG` при входе гостя в зону, а прямой спавн префаба классического гордо получает уникальный ID до регистрации в `GameModel` (`ClassicGordoSpawnIdPatch`).
-- **Еда SR1 в Слаймопедии и ловушках Гордо.** Добавлены статьи Слаймопедии для Ока-оки, Серебряного пастернака и Фазового лимона (открываются при сборе вакпаком); исправлено отображение всех трёх продуктов как приманки на ловушке Гордо (`GordoSnare`).
-- **Ртутный слайм на декоре.** `Quicksilver` спокойно сидит на скамейках, стульях, диванах и Сцене слайма №1 (`SlimeAttachPoint`), не срывая крепление своими рывками.
-- **Графика и совместимость со SlimeFPS / Creator Toolkit.** Обновлены иконки и арт Слаймопедии для всех 5 классических слаймов, уточнены блики и раздельное эластичное стекло для обычного Mosaic и ларго; процедурные сканлайны голограмм и фазовых лимонов защищены через `ignoreMipmapLimit` от размытия при снижении качества текстур.
+- **Кооператив Lycoreia 2.0 / 2.1.0-rc4 (и SR2MP).** Реализован рефлексивный мост `CoopCompat` без жёсткой зависимости от `Lycoreia.dll` / `Starlight.dll`:
+  - сбитые фазовые лимоны и акторы еды анонсируются в сеть (`CoopCompat.AnnounceSpawn` с обёрткой `VacuumExpelHook.Depth`, чтобы репликация у гостя не отбрасывалась при 60-секундном `SpawnBackoff`) и обрабатываются только лидером зоны (`IsSpawnAuthority`), а уничтожение на хосте выполняется через `DestroySharedActor` (`SlimeFoodAuthorityHook.HostConsumeDepth`);
+  - телепорты / выход из стен `Quantum` и притяжение / блики `Mosaic` выполняются только на стороне владельца физики актора (`IsLocallySimulated` через `ActorLink.LocallyOwned`);
+  - `Quicksilver` и `Glitch` выбирают ближайшего игрока среди локального и активных удалённых аватаров (`NearestPlayer` с фолбэком `root.transform`);
+  - награда за отладку `Glitch` выдаётся только при удержании в локальном вакпаке (`VacuumItem._held`), исключая двойное начисление у хоста и гостя;
+  - уже лопнувшие гордо деактивируются по `ALREADY_BURST_FLAG` при входе в активный сектор, прямой спавн префаба классического гордо получает уникальный ID до регистрации в `GameModel`, а пойманные на ловушку `GordoSnare` гордо корректно распознаются без создания лишних мировых моделей.
+- **Слаймопедия и сохранения.** Все 8 записей мода (`Pink.*_slime`, `CarrotVeggie.*`, `PogoFruit.*`) регистрируются в `SaveReferenceTranslation._pediaEntryLookup`, поэтому открытые статьи больше не стираются при загрузке сохранения; добавлена привязка плортов мода в `PediaDirector._identDict`, локализация недостающих 24 SR2-ларго (всего 60 пар на 9 языках) и изоляция иконок по конкретным UI-слотам (`Image.Pointer`), чтобы ванильные статьи (Tarr, Gold, Yolky и др.) никогда не повреждались.
+- **Исправления слаймов, гордо и еды SR1.** Восстановлены голоса `Quicksilver` и `Glitch` (`Snd.Cue`), исправлены застревание `Quicksilver` в мелкой воде и после декора, поимка Rad/Quantum/Mosaic гордо на ловушку (`GordoSnare`), внутреннее 3D-свечение спирали у `Quantum Gordo`, аура пойманного `Rad Gordo`, сохранение спирали на ларго `Quantum + Mosaic` без ошибок `_ColorMask` / `SimpleGlass`, пропадание и мерцание фасеточного стекла `Mosaic`, отложенный захват брошенных фруктов на дерево фазового лимона и сбалансированы веса дикого спавна и табло рынка.
 
 ## Совместимость с другими модами
 
-- **Lycoreia 2.x (кооп SR2):** поддерживается кооперативная синхронизация слаймов, еды и гордо (мод должен быть установлен у всех участников сессии).
+- **Lycoreia 2.0 / 2.1.0-rc4 (кооп SR2):** поддерживается кооперативная синхронизация слаймов, еды и гордо (мод должен быть установлен у всех участников сессии).
 - **[Creator Toolkit](https://github.com/slitvin12/SR2-CreatorToolkit) (0.9.1+) и [SlimeMap](https://github.com/slitvin12/SlimeMap) (1.1.1+):** классические гордо (`Rad`, `Quantum`, `Mosaic`) отображаются на карте и в трекере с собственными иконками, а у ларго на компасе показывается иконка базового слайма.
 - **[SlimeFPS](https://github.com/slitvin12/SlimeFPS) (1.1.1+):** частицы и ауры классических слаймов защищены от урезания в пресетах оптимизации, а сканлайны не теряют чёткость при снижении мип-уровней текстур.
 - **ChknnRancherMod:** несовместим с диким спавном слаймов — заменяет все наборы спавнеров на кур (подробнее в «Известные проблемы»).

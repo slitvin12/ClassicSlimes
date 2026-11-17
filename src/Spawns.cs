@@ -39,45 +39,73 @@ namespace ClassicSlimes
         static readonly HashSet<IntPtr> _touched = new();
         public static int ReAdded;
 
+        internal static void ClearSession()
+        {
+            _touched.Clear();
+            _homeSet.Clear();
+            _homes.Clear();
+            AddedPerScene.Clear();
+            Modified.Clear();
+        }
+
         /// <summary>Adds the classic slimes to the spawner's slime constraints; returns how many members were added (idempotent).</summary>
         static int Apply(DirectedActorSpawner spawner, string scene)
         {
             var constraints = spawner.Constraints;
             if (constraints == null) return 0;
-            int added = 0;
+            var specs = new List<(SlimeSpec spec, float p)>();
             foreach (var (spec, scenes) in _entries)
             {
                 if (!scenes.Any(z => scene.Contains(z))) continue;
                 float p = Mathf.Clamp(spec.Chance.Value, 0f, 0.9f);
                 if (Cfg.SpawnHomes.Value)
                 {
-                    // SR1-like fixed spots: only the slime's homes (a stable ~30 % of the zone's spawners) spawn it, but often
                     if (!IsHome(spawner, scene, spec)) continue;
                     p = Mathf.Clamp(p * 4f, 0.25f, 0.8f);
                 }
-                foreach (var c in constraints)
+                specs.Add((spec, p));
+            }
+            if (specs.Count == 0) return 0;
+            int added = 0;
+            foreach (var c in constraints)
+            {
+                if (c == null || c.Feral || c.Slimeset == null || c.Slimeset.Members == null) continue;
+                var members = c.Slimeset.Members;
+                if (members.Length == 0) continue;
+                float vanillaSum = 0f; bool skip = false, anySlime = false;
+                var present = new HashSet<IntPtr>();
+                foreach (var m in members)
                 {
-                    if (c == null || c.Feral || c.Slimeset == null || c.Slimeset.Members == null) continue;
-                    var members = c.Slimeset.Members;
-                    if (members.Length == 0) continue;
-                    float sum = 0f; bool skip = false, already = false, anySlime = false;
-                    foreach (var m in members)
-                    {
-                        if (m == null || m.IdentType == null) continue;
-                        string n = m.IdentType.name.ToLowerInvariant();
-                        if (Excluded.Any(x => n.Contains(x))) skip = true;
-                        if (m.IdentType == spec.Def) already = true;
-                        if (m.IdentType.TryCast<SlimeDefinition>() != null) anySlime = true;
-                        sum += m.Weight;
-                    }
-                    if (skip || already || !anySlime || sum <= 0f) continue;
-                    var mem = new SlimeSet.Member { _prefab = spec.Def.prefab, IdentType = spec.Def, Weight = sum * p / (1f - p) };
-                    var arr = new SlimeSet.Member[members.Length + 1];
-                    for (int i = 0; i < members.Length; i++) arr[i] = members[i];
-                    arr[members.Length] = mem;
-                    c.Slimeset.Members = Gc.Array(arr);   // write-barrier safe (runs during gameplay)
-                    added++;
+                    if (m == null || m.IdentType == null) continue;
+                    string n = m.IdentType.name.ToLowerInvariant();
+                    if (Excluded.Any(x => n.Contains(x))) skip = true;
+                    if (m.IdentType.TryCast<SlimeDefinition>() != null) anySlime = true;
+                    present.Add(m.IdentType.Pointer);
+                    bool isClassic = false;
+                    foreach (var s in specs) if (s.spec.Def != null && s.spec.Def.Pointer == m.IdentType.Pointer) { isClassic = true; break; }
+                    if (!isClassic) vanillaSum += m.Weight;
                 }
+                if (skip || !anySlime || vanillaSum <= 0f) continue;
+                var toAdd = new List<(SlimeSpec spec, float p)>();
+                float sumP = 0f;
+                foreach (var item in specs)
+                {
+                    sumP += item.p;
+                    if (!present.Contains(item.spec.Def.Pointer)) toAdd.Add(item);
+                }
+                if (toAdd.Count == 0) continue;
+                float totalP = Mathf.Clamp(sumP, 0f, 0.9f);
+                float scaleP = sumP > 0f ? totalP / sumP : 0f;
+                var arr = new SlimeSet.Member[members.Length + toAdd.Count];
+                for (int i = 0; i < members.Length; i++) arr[i] = members[i];
+                for (int j = 0; j < toAdd.Count; j++)
+                {
+                    var (spec, p) = toAdd[j];
+                    float w = vanillaSum * (p * scaleP) / Mathf.Max(0.1f, 1f - totalP);
+                    arr[members.Length + j] = new SlimeSet.Member { _prefab = spec.Def.prefab, IdentType = spec.Def, Weight = w };
+                }
+                c.Slimeset.Members = Gc.Array(arr);   // write-barrier safe (runs during gameplay)
+                added += toAdd.Count;
             }
             return added;
         }
@@ -123,9 +151,10 @@ namespace ClassicSlimes
         /// <summary>Loaded home spawners of a classic slime (gordo spot search).</summary>
         internal static List<(Vector3 pos, string scene)> HomesOf(string slime)
         {
+            _homes.RemoveAll(h => h.sp == null);
             var r = new List<(Vector3, string)>();
             foreach (var h in _homes)
-                if (h.sp != null && h.names.Split('+').Contains(slime)) r.Add((h.sp.transform.position, h.scene));
+                if (h.names.Split('+').Contains(slime)) r.Add((h.sp.transform.position, h.scene));
             return r;
         }
 

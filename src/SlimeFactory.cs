@@ -186,7 +186,8 @@ namespace ClassicSlimes
                 plortObj.SetObjectIdent(s.Plort);
                 Library.SetPlortColor(s.Top, s.Mid, s.Bot, plortObj);
                 s.Plort.MakeVaccable();
-                try { if (Library.plorts != null && !Library.plorts.IsMember(s.Plort)) { Library.plorts._memberTypes.Add(s.Plort); } } catch { }
+                RegisterInGroup(Library.plorts, s.Plort);
+                RegisterGroupByName("PlortGroupDroneExplorer", s.Plort);
             }
 
             s.Def = Library.CreateSlimeDef(s.Name, s.Ammo, icon, UnityEngine.Object.Instantiate(pink.AppearancesDefault[0]), s.Name + "Default", "SlimeDefinition." + s.Name, s.Largo, s.LargoSettings);
@@ -220,18 +221,18 @@ namespace ClassicSlimes
             }
             else def.FavoriteToyIdents = new Il2CppReferenceArray<ToyDefinition>(0);
             def.RefreshEatmap();
-            def.MakeVaccable();
+            if (s.Name != "Glitch") def.MakeVaccable();
             try
             {
+                bool edible = s.Name == "Rad" || s.Name == "Quantum" || s.Name == "Mosaic";
                 foreach (var grp in Resources.FindObjectsOfTypeAll<IdentifiableTypeGroup>())
                 {
                     if (grp == null) continue;
-                    if (grp.name == "BaseSlimeGroup" || grp.name == "VaccableBaseSlimeGroup" || grp.name == "SlimesGroup")
-                    {
-                        if (grp._memberTypes != null && !grp._memberTypes.Contains(def)) grp._memberTypes.Add(def);
-                        var rt = grp.GetRuntimeObject();
-                        if (rt != null && !rt.IsMember(def)) rt.AddMember(def);
-                    }
+                    string gn = grp.name;
+                    if (gn == "BaseSlimeGroup" || gn == "SlimesGroup" || gn == "SmallSlimeGroup"
+                        || (gn == "VaccableBaseSlimeGroup" && s.Name != "Glitch")
+                        || (gn == "EdibleSlimeGroup" && edible))
+                        RegisterInGroup(grp, def);
                 }
             }
             catch { }
@@ -259,7 +260,7 @@ namespace ClassicSlimes
             {
                 def._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
                 def._requiresFullArt = false;
-                app._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
+                app._fullArt = null;
                 ClassicSlimesMod.Log.Msg($"  {s.Name} fullArt cleared requires={def.RequiresFullArt}/{app.RequiresFullArt}");
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"Full art {s.Name}: {e.Message}"); }
@@ -284,6 +285,29 @@ namespace ClassicSlimes
                     Library.CreateLocalizedString("m.plortonomics." + s.Key + "_slime", "Pedia"));
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"Pedia for {s.Name} failed: {e.Message}"); }
+        }
+
+        internal static void RegisterInGroup(IdentifiableTypeGroup grp, IdentifiableType item)
+        {
+            if (grp == null || item == null) return;
+            try
+            {
+                if (grp._memberTypes != null && !grp._memberTypes.Contains(item)) grp._memberTypes.Add(item);
+                var rt = grp.GetRuntimeObject();
+                if (rt != null && !rt.IsMember(item)) rt.AddMember(item);
+            }
+            catch { }
+        }
+
+        internal static void RegisterGroupByName(string groupName, IdentifiableType item)
+        {
+            if (string.IsNullOrEmpty(groupName) || item == null) return;
+            try
+            {
+                foreach (var grp in Resources.FindObjectsOfTypeAll<IdentifiableTypeGroup>())
+                    if (grp != null && grp.name == groupName) RegisterInGroup(grp, item);
+            }
+            catch { }
         }
 
         /// <summary>Cotton creates largos after SaveDirectorLoaded; give them proper names and our visuals.</summary>

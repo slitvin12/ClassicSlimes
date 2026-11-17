@@ -21,7 +21,7 @@ namespace ClassicSlimes
     {
         static readonly List<ElasticGlassRig> Live = new();
         static readonly HashSet<string> Unreadable = new();
-        static readonly HashSet<string> BakeOk = new(), BakeNo = new();
+        static readonly HashSet<int> BakeOk = new(), BakeNo = new();
         internal static bool Show = true;
         internal static double TotalMs;
         static readonly int HeldId = Shader.PropertyToID("_HeldInVac");
@@ -48,8 +48,10 @@ namespace ClassicSlimes
             {
                 if (r == null) continue;
                 var m = r.sharedMaterial;
+                if (m == null) continue;
+                if (m.name == "QuantumHoloBody") { seen.Add(r.Pointer); continue; }
                 // Tile bodies (slime body shader) plus every glass part of a mosaic largo (ears, spikes, rings, petals).
-                if (m == null || !m.name.Contains("Mosaic") || m.shader == null) continue;
+                if (!m.name.Contains("Mosaic") || m.shader == null) continue;
                 if (m.shader.name != "SR/AMP/Slime/Body" && !m.name.Contains("_MosaicPart")) continue;
                 var skin = r.TryCast<SkinnedMeshRenderer>();
                 var filter = skin == null ? r.GetComponent<MeshFilter>() : null;
@@ -93,8 +95,9 @@ namespace ClassicSlimes
         /// </summary>
         static bool CanBake(SkinnedMeshRenderer skin, Mesh src)
         {
-            if (BakeOk.Contains(src.name)) return true;
-            if (BakeNo.Contains(src.name)) return false;
+            int id = src.GetInstanceID();
+            if (BakeOk.Contains(id)) return true;
+            if (BakeNo.Contains(id)) return false;
             bool ok = false;
             try
             {
@@ -104,7 +107,7 @@ namespace ClassicSlimes
                 Object.Destroy(probe);
             }
             catch { ok = false; }
-            (ok ? BakeOk : BakeNo).Add(src.name);
+            (ok ? BakeOk : BakeNo).Add(id);
             ClassicSlimesMod.Log.Msg(ok
                 ? $"Elastic mosaic glass: mesh {src.name} bakes on the CPU - elastic coat (was rigid)"
                 : $"Elastic mosaic glass: mesh {src.name} cannot be CPU-baked - rigid GPU coat");
@@ -187,7 +190,11 @@ namespace ClassicSlimes
                     // shell for good: hide the coats, force a resync, and only give up after repeated failures.
                     foreach (var c in rig._coats) if (c.Renderer != null) c.Renderer.enabled = false;
                     rig._scanAt = 0f;
-                    if (++rig._errors >= 5) rig._failed = true;
+                    if (++rig._errors >= 5)
+                    {
+                        rig._failed = true;
+                        foreach (var c in rig._coats) SlimeFacets.RestoreTiles(c.Source);
+                    }
                     if (rig._errors == 1) ClassicSlimesMod.Log.Warning("Elastic mosaic glass: " + e);
                 }
             }
@@ -203,7 +210,8 @@ namespace ClassicSlimes
                 if (c.Source == null || c.Renderer == null) continue;
                 // Unity LOD culling does NOT change Renderer.enabled. Mirror actual source visibility;
                 // otherwise three inactive, unskinned low-detail spheres would also draw a rigid clear coat.
-                bool draw = Show && valid && c.Source.enabled && c.Source.gameObject.activeInHierarchy && !c.Source.forceRenderingOff && c.Source.isVisible;
+                bool holo = c.Source.sharedMaterial != null && c.Source.sharedMaterial.name == "QuantumHoloBody";
+                bool draw = Show && !holo && c.Source.enabled && c.Source.gameObject.activeInHierarchy && !c.Source.forceRenderingOff && (c.InLodGroup || c.Source.isVisible);
                 c.Renderer.enabled = draw;
                 if (!draw || c.Gpu) continue;
                 c.Source.GetPropertyBlock(c.Properties);
@@ -224,7 +232,7 @@ namespace ClassicSlimes
                 var vs = MemoryMarshal.Cast<Vector3, V>(verts.AsSpan());
                 var m = c.Transform.localToWorldMatrix; var inv = c.Transform.worldToLocalMatrix;
                 var localDelta = Direction(inv, w.Delta);
-                bool warp = !held && !c.Rigid;
+                bool warp = valid && !held && !c.Rigid;
                 if (c.Shell != null)
                 {
                     // Mosaic slime / largo body: the SR1 facet shell rides on the baked body's triangles, then gets the same warp
@@ -278,8 +286,10 @@ namespace ClassicSlimes
                 float influence = Smooth(1f - d.Length() / w.Radius);
                 float bulge = Smooth(MathF.Abs(w.MaskRange) > 0.000001f ? (influence - w.MaskMin) / w.MaskRange : 0f);
                 var projection = Point(inv, world - w.Normal * (V.Dot(d, w.Normal) / w.NormalSq));
-                var radial = Unit(p - w.UnitNormal * V.Dot(p, w.UnitNormal));
-                displacement += ((projection - pv) * influence + radial * (w.Bulge * bulge)) * w.Squash;
+                var rel = world - w.Center;
+                var worldRadial = Unit(rel - w.UnitNormal * V.Dot(rel, w.UnitNormal));
+                var localBulge = Direction(inv, worldRadial * (w.Bulge * bulge));
+                displacement += ((projection - pv) * influence + localBulge) * w.Squash;
             }
             return displacement;
         }
@@ -316,6 +326,8 @@ namespace ClassicSlimes
             internal readonly bool Facet;
             internal readonly int Version;
             internal readonly SlimeFacets.Shell Shell;
+            internal readonly bool InLodGroup;
+            readonly LODGroup _lodGroup;
             readonly GameObject _go;
             internal Coat(UnityEngine.Renderer source, SkinnedMeshRenderer skin, Mesh original, Material material, bool gpu = false, Transform facets = null)
             {
@@ -369,6 +381,43 @@ namespace ClassicSlimes
                 Renderer.reflectionProbeUsage = source.reflectionProbeUsage;
                 Renderer.lightProbeUsage = source.lightProbeUsage; Renderer.renderingLayerMask = source.renderingLayerMask;
                 Renderer.enabled = false;
+                _lodGroup = source.GetComponentInParent<LODGroup>();
+                if (_lodGroup != null) InLodGroup = SyncLodGroup(_lodGroup, source, Renderer, true);
+            }
+
+            static bool SyncLodGroup(LODGroup lg, Renderer match, Renderer coat, bool add)
+            {
+                if (lg == null || coat == null) return false;
+                try
+                {
+                    var lods = lg.GetLODs();
+                    if (lods == null || lods.Length == 0) return false;
+                    bool touched = false;
+                    for (int i = 0; i < lods.Length; i++)
+                    {
+                        var lod = lods[i];
+                        var rs = lod.renderers;
+                        if (rs == null) continue;
+                        var list = new List<Renderer>(rs.Length + 1);
+                        bool hasMatch = false, hasCoat = false;
+                        foreach (var r in rs)
+                        {
+                            if (r == null) continue;
+                            if (r.Pointer == coat.Pointer) { hasCoat = true; if (add) list.Add(r); else touched = true; continue; }
+                            if (match != null && r.Pointer == match.Pointer) hasMatch = true;
+                            list.Add(r);
+                        }
+                        if (add && hasMatch && !hasCoat) { list.Add(coat); touched = true; }
+                        if (touched)
+                        {
+                            lod.renderers = Gc.Array(list);
+                            lods[i] = lod;
+                        }
+                    }
+                    if (touched) lg.SetLODs(lods);
+                    return touched;
+                }
+                catch { return false; }
             }
             /// <summary>The CPU bake target. <see cref="HideFlags.DontUnloadUnusedAsset"/> keeps it alive: on a facet coat it
             /// is not on any MeshFilter (that draws <see cref="SlimeFacets.Shell.Mesh"/>), so a native reference never protects
@@ -392,7 +441,13 @@ namespace ClassicSlimes
                 return Mesh != null;
             }
 
-            public void Dispose() { if (_go != null) Object.Destroy(_go); if (Mesh != null) Object.Destroy(Mesh); if (Shell?.Mesh != null) Object.Destroy(Shell.Mesh); }
+            public void Dispose()
+            {
+                if (_lodGroup != null && InLodGroup) SyncLodGroup(_lodGroup, null, Renderer, false);
+                if (_go != null) Object.Destroy(_go);
+                if (Mesh != null) Object.Destroy(Mesh);
+                if (Shell?.Mesh != null) Object.Destroy(Shell.Mesh);
+            }
         }
     }
 

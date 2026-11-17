@@ -48,19 +48,41 @@ namespace ClassicSlimes
         static void AddTo(IdentifiableTypeGroup g, IdentifiableType t)
         {
             if (g == null || t == null) return;
-            if (!g._memberTypes.Contains(t)) g._memberTypes.Add(t);
-            try
+            var all = Resources.FindObjectsOfTypeAll<IdentifiableTypeGroup>();
+            var queue = new Queue<IdentifiableTypeGroup>();
+            var visited = new HashSet<IntPtr>();
+            queue.Enqueue(g);
+            visited.Add(g.Pointer);
+            while (queue.Count > 0)
             {
-                var rt = g.GetRuntimeObject();
-                if (rt != null && !rt.IsMember(t)) rt.AddMember(t);
+                var cur = queue.Dequeue();
+                if (cur == null) continue;
+                try
+                {
+                    if (cur._memberTypes != null && !cur._memberTypes.Contains(t)) cur._memberTypes.Add(t);
+                    var rt = cur.GetRuntimeObject();
+                    if (rt != null && !rt.IsMember(t)) rt.AddMember(t);
+                }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning($"group {cur.name} runtime: {e.Message}"); }
+                foreach (var pg in all)
+                {
+                    if (pg == null || pg._memberGroups == null || !visited.Add(pg.Pointer)) continue;
+                    try
+                    {
+                        bool contains = false;
+                        foreach (var mg in pg._memberGroups) if (mg != null && mg.Pointer == cur.Pointer) { contains = true; break; }
+                        if (contains) queue.Enqueue(pg);
+                    }
+                    catch { visited.Remove(pg.Pointer); }
+                }
             }
-            catch (Exception e) { ClassicSlimesMod.Log.Warning($"group {g.name} runtime: {e.Message}"); }
         }
 
         /// <summary>Called before the slimes are created (their favourites are looked up in the food groups).</summary>
         public static void Setup()
         {
-            if (!Cfg.EnableFoods.Value) { ClassicSlimesMod.Log.Msg("SR1 foods disabled in config"); return; }
+            bool enabled = Cfg.EnableFoods.Value;
+            if (!enabled) ClassicSlimesMod.Log.Msg("SR1 foods disabled in config (registering load IDs only)");
             var byName = new Dictionary<string, IdentifiableType>();
             foreach (var t in Resources.FindObjectsOfTypeAll<IdentifiableType>())
                 if (t != null && !byName.ContainsKey(t.name)) byName[t.name] = t;
@@ -73,19 +95,21 @@ namespace ClassicSlimes
                     string refId = string.IsNullOrEmpty(t.referenceId) ? "IdentifiableType." + t.name : t.referenceId;
                     t.referenceId = refId;
                     Invoke("INTERNAL_SetupLoadForIdent", refId, t);
+                    if (!enabled) continue;
                     var group = f.Fruit ? Library.fruits : Library.veggies;
                     AddTo(group, t);
+                    SlimeFactory.RegisterGroupByName(f.Fruit ? "FruitQuantumCloudGroup" : "VeggieQuantumCloudGroup", t);
                     if (t.groupType == null) t.groupType = group;
                     Library.MakeVaccable(t);
+                    t.localizedName = Library.CreateLocalizedString(f.Key);
                     string shown = null;
                     try { shown = t.localizedName?.GetLocalizedString(); } catch { }
-                    if (t.localizedName == null || string.IsNullOrEmpty(shown) || shown.StartsWith("No translation", StringComparison.OrdinalIgnoreCase) || shown == f.Key)
-                        t.localizedName = Library.CreateLocalizedString(f.Key);
                     f.Scenes = Library.GetSceneNamesFromSpawnerZones(f.Zones).Select(x => x.ToLowerInvariant()).ToArray();
                     ClassicSlimesMod.Log.Msg($"  food {t.name} ref={refId} group={group?.name} name='{shown}' wild=[{string.Join(",", f.Scenes)}]");
                 }
                 catch (Exception e) { ClassicSlimesMod.Log.Error($"Food {f.Ident}: {e}"); }
             }
+            if (!enabled) { SetupPhaseLemonLoadOnly(byName); return; }
             Ready = All.Any(f => f.Type != null);
             if (!Ready) return;
             // food-group based diets were built before the new members existed
@@ -167,7 +191,6 @@ namespace ClassicSlimes
 
         public static void EnsurePediaDirectorLinks()
         {
-            if (FoodPediaEntries.Count == 0) return;
             foreach (var pd in Resources.FindObjectsOfTypeAll<PediaDirector>())
             {
                 if (pd == null || pd._identDict == null) continue;
@@ -180,6 +203,17 @@ namespace ClassicSlimes
                     {
                         if (!pd._identDict.ContainsKey(ident))
                             pd._identDict.Add(ident, entry);
+                    }
+                    catch { }
+                }
+                foreach (var s in SlimeFactory.Specs)
+                {
+                    if (s?.Def == null || s.Plort == null) continue;
+                    try
+                    {
+                        var se = pd.GetEntry(s.Def);
+                        if (se != null && !pd._identDict.ContainsKey(s.Plort))
+                            pd._identDict.Add(s.Plort, se);
                     }
                     catch { }
                 }
@@ -247,6 +281,33 @@ namespace ClassicSlimes
         const string PhaseLemonKey = "1051811259578094a8004e87615f38b6";   // LemonPhase.asset in the addressables catalog
 
         public class PhaseLemon { public GameObject Go; public IntPtr Ptr; public MeshRenderer Solid; public float Next; public bool On, Seen; }
+
+        static void SetupPhaseLemonLoadOnly(Dictionary<string, IdentifiableType> byName)
+        {
+            byName.TryGetValue("LemonPhase", out var p);
+            if (p == null || p.prefab == null)
+            {
+                try { var l = UnityEngine.AddressableAssets.Addressables.LoadAssetAsync<IdentifiableType>(PhaseLemonKey).WaitForCompletion(); if (l != null) p = l; }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon: addressable load failed: " + e.Message); }
+            }
+            if (p == null) return;
+            if (p.hideFlags == HideFlags.None) p.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            string refId = string.IsNullOrEmpty(p.referenceId) ? "IdentifiableType." + p.name : p.referenceId;
+            p.referenceId = refId;
+            Invoke("INTERNAL_SetupLoadForIdent", refId, p);
+            _phase = p;
+        }
+
+        internal static void ClearSession()
+        {
+            Spots.Clear();
+            Added.Clear();
+            _logged = 0;
+            PhaseTrees = 0;
+            PhaseTriggers = 0;
+            PhaseHits = 0;
+            _phaseLog = 0;
+        }
 
         static void SetupPhaseLemon(Dictionary<string, IdentifiableType> byName)
         {
@@ -328,10 +389,10 @@ namespace ClassicSlimes
             PhaseTrees++;
         }
 
-        internal static GameObject SpawnActor(IdentifiableType t, Vector3 pos, Quaternion rot)
+        internal static GameObject SpawnActor(IdentifiableType t, Vector3 pos, Quaternion rot, Il2CppMonomiPark.SlimeRancher.SceneManagement.SceneGroup sceneGroup = null)
         {
             var sc = SRSingleton<SceneContext>.Instance;
-            var group = sc.RegionRegistry.CurrentSceneGroup;
+            var group = sceneGroup ?? sc.RegionRegistry.CurrentSceneGroup;
             Il2CppMonomiPark.SlimeRancher.DataModel.ActorModel model = null;
             try { model = sc.GameModel.InstantiateActorModel(t, group, pos, rot, false); }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"InstantiateActorModel({t.name}): {e.Message}"); }
@@ -448,10 +509,10 @@ namespace ClassicSlimes
             var t = ida != null ? ida.identType : null;
             if (t == null || t == _lemon || t == _phase || !InGroup(Library.fruits, t)) return;
             if (!CoopCompat.IsSpawnAuthority(tree.transform.position)) return;
-            if (!tree.Handled.Add(go.Pointer)) return;
-            PhaseTriggers++;
             var vac = go.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
             if (vac != null && vac.IsHeld()) return;
+            if (!tree.Handled.Add(go.Pointer)) return;
+            PhaseTriggers++;
             var joint = tree.Sr.PickRipeResourceJoint();
             var body = joint != null ? joint.connectedBody : null;
             if (Diag.Enabled && _phaseLog++ < 12)
@@ -460,8 +521,11 @@ namespace ClassicSlimes
             Vector3 pos = joint.transform.position;
             Quaternion rot = joint.transform.rotation;
             Vector3 fruitPos = go.transform.position;
-            Destroyer.DestroyActor(body.gameObject, "ClassicSlimes.LemonPhasor", false);
-            var lemon = SpawnActor(_lemon, pos, rot);
+            try { body.GetComponent<ResourceCycle>()?.DetachFromJoint(); } catch { }
+            try { joint.connectedBody = null; } catch { }
+            CoopCompat.DestroySharedActor(body.gameObject, "ClassicSlimes.LemonPhasor", false);
+            var sg = tree.Sr.GetComponentInParent<Il2CppMonomiPark.SlimeRancher.Regions.Region>()?.SceneGroup;
+            var lemon = SpawnActor(_lemon, pos, rot, sg);
             if (lemon != null)
             {
                 FixLemon(lemon, false);
@@ -479,7 +543,7 @@ namespace ClassicSlimes
             }
             PlayFx(_phaseInFx != null ? _phaseInFx : _phaseOutFx, pos);
             PlayFx(_phaseOutFx, fruitPos);
-            Destroyer.DestroyActor(go, "ClassicSlimes.LemonPhasor", false);
+            CoopCompat.DestroySharedActor(go, "ClassicSlimes.LemonPhasor", false);
             PhaseHits++;
         }
 
@@ -493,7 +557,7 @@ namespace ClassicSlimes
                 _phaseHolo = new Material(src) { name = "PhaseLemonHolo", hideFlags = HideFlags.DontUnloadUnusedAsset };
                 _phaseHolo.SetColor("_UnlitColor", new Color(1.6f, 1.45f, 0.5f, 1f));
                 _phaseHolo.SetTextureScale("_UnlitColorMap", new Vector2(2f, 3f));
-                return _phaseHolo;
+                return Mat.Track(_phaseHolo);
             }
         }
 
@@ -561,7 +625,12 @@ namespace ClassicSlimes
                 {
                     var l = t.Lemons[i];
                     if (l.Seen) continue;
-                    if (l.Go != null && l.Solid != null) l.Solid.enabled = true;
+                    if (l.Go != null && l.Solid != null)
+                    {
+                        l.Solid.enabled = true;
+                        var h = l.Solid.transform.Find(PhaseHoloName);
+                        if (h != null) h.gameObject.SetActive(false);
+                    }
                     t.Lemons.RemoveAt(i);
                 }
             }
@@ -751,7 +820,8 @@ namespace ClassicSlimes
                 clone = Object.Instantiate(def);
                 clone.name = def.name + "_" + grow.name;
                 clone.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                clone._resources = new Il2CppReferenceArray<Entry>(new[] { new Entry { ResourceIdentifiableType = grow, Weight = 1f, MinimumAmount = 0 } });
+                clone._primaryResourceType = pick.Type;
+                clone._resources = Gc.Array(new[] { new Entry { ResourceIdentifiableType = grow, Weight = 1f, MinimumAmount = 0 } });
                 _clones[(def.Pointer, grow.name)] = clone;
                 _mine.Add(clone.Pointer);
             }
@@ -808,6 +878,12 @@ namespace ClassicSlimes
         {
             try { Foods.OnPhaseTrigger(this, col); }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon trigger: " + e.Message); }
+        }
+
+        void OnTriggerStay(Collider col)
+        {
+            try { Foods.OnPhaseTrigger(this, col); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon stay: " + e.Message); }
         }
 
         void Update()

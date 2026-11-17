@@ -25,14 +25,17 @@ namespace ClassicSlimes
         {
             if (ui == null || ui._config == null || ui._config._plorts == null || ui.pricesPanels == null) return;
             var seen = new HashSet<string>();
-            int need = 0;
+            var unique = new List<Il2CppMonomiPark.SlimeRancher.UI.PlortEntry>();
+            bool dup = false;
             foreach (var p in ui._config._plorts)
             {
-                if (p == null) continue;
+                if (p == null) { dup = true; continue; }
                 string id = p.IdentType != null ? (p.IdentType.ReferenceId ?? p.IdentType.name) : null;
-                if (!string.IsNullOrEmpty(id) && !seen.Add(id)) continue;
-                need++;
+                if (!string.IsNullOrEmpty(id) && !seen.Add(id)) { dup = true; continue; }
+                unique.Add(p);
             }
+            if (dup) ui._config._plorts = Gc.Array(unique);
+            int need = unique.Count;
             var list = new List<MarketUI.PricesPanelEntry>();
             var used = new HashSet<IntPtr>();
             int slots = 0, tallest = 0;
@@ -81,8 +84,15 @@ namespace ClassicSlimes
                     if (best != null) { best.entryCount++; slots++; progress = true; }
                 }
             }
+            while (slots < need && list.Count > 0)
+            {
+                MarketUI.PricesPanelEntry best = list[0];
+                foreach (var e in list) if (e.entryCount < best.entryCount) best = e;
+                best.entryCount++;
+                slots++;
+            }
             if (added > 0 || slots != before)
-                ui.pricesPanels = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<MarketUI.PricesPanelEntry>(list.ToArray());
+                ui.pricesPanels = Gc.Array(list);
             LastGrow = $"need {need}, slots {before} -> {slots} (+{added} columns, max {maxRows} rows)";
             MelonLoader.MelonLogger.Msg("[ClassicSlimes] Market board: " + LastGrow);
         }

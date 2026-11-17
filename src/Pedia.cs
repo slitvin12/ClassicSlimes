@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using Il2Cpp;
+using Il2CppMonomiPark.SlimeRancher;
 using Il2CppMonomiPark.SlimeRancher.Pedia;
 using Il2CppMonomiPark.SlimeRancher.UI.Pedia;
 using UnityEngine;
@@ -29,20 +30,58 @@ namespace ClassicSlimes
         sealed class DietInfo { public LocalizedString Text; public Func<Sprite> Find; public Sprite Icon; }
         static readonly Dictionary<IntPtr, DietInfo> Diets = new();
         static readonly Dictionary<string, Sprite> GameSprites = new();
-        static readonly HashSet<IntPtr> Ours = new();                    // every sprite this class puts into the pedia
-        static readonly Dictionary<IntPtr, Sprite> Original = new();     // image -> sprite it had before we first changed it
+        static readonly Dictionary<IntPtr, Sprite> Applied = new();                  // image -> sprite we last wrote
+        static readonly Dictionary<IntPtr, Sprite> Original = new();                 // image -> sprite it had before we first changed it
         static bool _err;
 
         public static void Register(IdentifiableType ident, Sprite art)
         {
             if (ident == null || art == null) return;
-            Art[ident.Pointer] = art; Ours.Add(art.Pointer);
+            Art[ident.Pointer] = art;
         }
 
         public static void RegisterPlort(IdentifiableType slime, Sprite art)
         {
             if (slime == null || art == null) return;
-            PlortArt[slime.Pointer] = art; Ours.Add(art.Pointer);
+            PlortArt[slime.Pointer] = art;
+        }
+
+        public static void ClearSession()
+        {
+            Views.Clear();
+            Applied.Clear();
+            Original.Clear();
+            GameSprites.Clear();
+            Logged.Clear();
+        }
+
+        public static void RegisterPersistence(SaveReferenceTranslation srt = null)
+        {
+            try
+            {
+                srt ??= GameContext.Instance?.AutoSaveDirector?._saveReferenceTranslation;
+                var lookup = srt?._pediaEntryLookup;
+                if (lookup == null) return;
+                int added = 0;
+                foreach (var pe in Resources.FindObjectsOfTypeAll<PediaEntry>())
+                {
+                    if (pe == null) continue;
+                    try
+                    {
+                        string pid = pe.PersistenceId;
+                        if (!string.IsNullOrEmpty(pid) && !lookup.ContainsKey(pid)) { lookup[pid] = pe; added++; }
+                    }
+                    catch { }
+                    try
+                    {
+                        string nm = pe.name;
+                        if (!string.IsNullOrEmpty(nm) && !lookup.ContainsKey(nm)) { lookup[nm] = pe; added++; }
+                    }
+                    catch { }
+                }
+                if (added > 0 && Diag.Enabled) ClassicSlimesMod.Log.Msg($"[pedia] registered {added} persistence key(s) in SaveReferenceTranslation");
+            }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("Pedia persistence register: " + e.Message); }
         }
 
         public static void RegisterDiet(IdentifiableType slime, LocalizedString text, Func<Sprite> icon)
@@ -88,32 +127,40 @@ namespace ClassicSlimes
         {
             var h = DietSlot(view);
             if (h == null) return;
-            if (d.Icon == null && full && d.Find != null) { d.Icon = d.Find(); if (d.Icon != null) Ours.Add(d.Icon.Pointer); }
+            if (d.Icon == null && full && d.Find != null) d.Icon = d.Find();
             var ic = h._categoryIcon;
             // the game sets the category icons through .sprite (no override), so it restores them on the next entry
-            if (d.Icon != null && ic != null && (ic.sprite == null || ic.sprite.Pointer != d.Icon.Pointer)) { Keep(ic); ic.sprite = d.Icon; ic.preserveAspect = true; }
+            if (d.Icon != null && ic != null && (ic.sprite == null || ic.sprite.Pointer != d.Icon.Pointer)) { Keep(ic); ic.sprite = d.Icon; Applied[ic.Pointer] = d.Icon; ic.preserveAspect = true; }
             if (full && d.Text != null && h._valueString != null) { h._valueString.StringReference = d.Text; h._valueString.RefreshString(); }
         }
 
         static void Keep(Image img)
         {
-            if (img != null && !Original.ContainsKey(img.Pointer) && (img.sprite == null || !Ours.Contains(img.sprite.Pointer))) Original[img.Pointer] = img.sprite;
+            if (img == null || Original.ContainsKey(img.Pointer) || Applied.ContainsKey(img.Pointer)) return;
+            Original[img.Pointer] = img.sprite;
         }
 
-        /// <summary>A vanilla entry is shown in a view we changed before: drop our sprites the game did not replace itself.</summary>
+        /// <summary>Restores any images on this view that we previously overwrote before showing a different entry.</summary>
         static void Clean(PediaEntryIconAndHighlights view)
         {
             void One(Image img)
             {
-                if (img == null) return;
-                var act = img.overrideSprite;   // active sprite: override, else sprite
-                if (act == null || !Ours.Contains(act.Pointer)) return;
-                img.overrideSprite = null;
-                if (img.sprite != null && Ours.Contains(img.sprite.Pointer) && Original.TryGetValue(img.Pointer, out var o)) img.sprite = o;
+                if (img == null || !Applied.TryGetValue(img.Pointer, out var ours)) return;
+                Applied.Remove(img.Pointer);
+                try
+                {
+                    var ov = img.overrideSprite;
+                    if (ov != null && ours != null && ov.Pointer == ours.Pointer) img.overrideSprite = null;
+                    if (Original.TryGetValue(img.Pointer, out var orig) && img.sprite != null && ours != null && img.sprite.Pointer == ours.Pointer)
+                    {
+                        if ((object)orig == null || orig != null) img.sprite = orig;
+                    }
+                }
+                catch { }
             }
             One(view._primaryIcon); One(view._secondaryIcon);
-            var hs = view._highlights;
-            if (hs != null) for (int i = 0; i < hs.Length; i++) One(hs[i]?._categoryIcon);
+            var ds = DietSlot(view);
+            if (ds != null) One(ds._categoryIcon);
         }
 
         static Sprite PlortFor(PediaEntry entry)
@@ -134,8 +181,9 @@ namespace ClassicSlimes
         public static void Shown(PediaEntryIconAndHighlights view, PediaEntry entry)
         {
             if (view == null) return;
+            Clean(view);
             var sp = For(entry);
-            if (sp == null) { Views.Remove(view.Pointer); Clean(view); return; }
+            if (sp == null) { Views.Remove(view.Pointer); return; }
             Views[view.Pointer] = view;
             Apply(view, sp, PlortFor(entry));
             var diet = DietFor(entry);
@@ -145,8 +193,8 @@ namespace ClassicSlimes
         static void Apply(PediaEntryIconAndHighlights view, Sprite sp, Sprite plort)
         {
             var sec = plort != null ? view._secondaryIcon : null;
-            if (sec != null && (sec.sprite == null || sec.sprite.Pointer != plort.Pointer)) { Keep(sec); sec.sprite = plort; sec.preserveAspect = true; }
-            if (sec != null && sec.overrideSprite != null && sec.overrideSprite.Pointer != plort.Pointer) sec.overrideSprite = plort;
+            if (sec != null && (sec.sprite == null || sec.sprite.Pointer != plort.Pointer)) { Keep(sec); sec.sprite = plort; Applied[sec.Pointer] = plort; sec.preserveAspect = true; }
+            if (sec != null && sec.overrideSprite != null && sec.overrideSprite.Pointer != plort.Pointer) { sec.overrideSprite = plort; Applied[sec.Pointer] = plort; }
             var img = view._primaryIcon;
             if (img == null) return;
             // without full art the game shows the identifiable icon through overrideSprite, which wins over sprite
@@ -156,6 +204,7 @@ namespace ClassicSlimes
                 Keep(img);
                 img.sprite = sp;
                 img.overrideSprite = sp;
+                Applied[img.Pointer] = sp;
                 if (Logged.Add(sp.Pointer)) ClassicSlimesMod.Log.Msg($"Pedia art: {sp.name} -> {view.name}");
             }
             img.preserveAspect = true;
@@ -238,6 +287,22 @@ namespace ClassicSlimes
         {
             try { PediaArt.Shown(__instance, entry); }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("Pedia art patch: " + e.Message); }
+        }
+    }
+
+    [HarmonyPatch]
+    static class PediaSaveLoadPatch
+    {
+        static IEnumerable<System.Reflection.MethodBase> TargetMethods()
+        {
+            foreach (var m in typeof(AutoSaveDirector).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance))
+                if (m.Name == "Load") yield return m;
+        }
+
+        static void Prefix(AutoSaveDirector __instance)
+        {
+            try { if (__instance != null) PediaArt.RegisterPersistence(__instance._saveReferenceTranslation); }
+            catch { }
         }
     }
 }

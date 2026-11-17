@@ -220,25 +220,20 @@ namespace ClassicSlimes
                 mo => { var m = Object.Instantiate(mo); m.name = mo.name + "_Glitch"; m.hideFlags = HideFlags.DontUnloadUnusedAsset; mouthCols(m); return m; });
 
             // SR1 atlases per expression (eyes and mouth of SR1 share one atlas)
-            var exprByEyes = new Dictionary<IntPtr, Expr>();
-            var exprByMouth = new Dictionary<IntPtr, Expr>();
-            foreach (var (ex, e, mo) in Faces.Read(src))
-            {
-                if (e != null && !exprByEyes.ContainsKey(e.Pointer)) exprByEyes[e.Pointer] = ex;
-                if (mo != null && !exprByMouth.ContainsKey(mo.Pointer)) exprByMouth[mo.Pointer] = ex;
-            }
-            _glitchFaceSR1 = Faces.Clone(src, "faceSlimeGlitchSR1",
-                e =>
+            _glitchFaceSR1 = Faces.CloneByExpr(src, "faceSlimeGlitchSR1",
+                (ex, e) =>
                 {
-                    var m = Object.Instantiate(e); m.name = e.name + "_GlitchSR1"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                    var atlas = Res.Tex(exprByEyes.TryGetValue(e.Pointer, out var ex) ? GlitchAtlas(ex) : "face_glitch_happy", true, false);
-                    m.Tx("_FaceAtlas", atlas); eyeCols(m); return m;
+                    var m = Object.Instantiate(e); m.name = $"{e.name}_GlitchSR1_{ex}"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                    var atlas = Res.Tex(GlitchAtlas(ex), true, false);
+                    if (atlas != null) m.Tx("_FaceAtlas", atlas);
+                    eyeCols(m); return m;
                 },
-                mo =>
+                (ex, mo) =>
                 {
-                    var m = Object.Instantiate(mo); m.name = mo.name + "_GlitchSR1"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                    var atlas = Res.Tex(exprByMouth.TryGetValue(mo.Pointer, out var ex) ? GlitchAtlas(ex) : "face_glitch_happy", true, false);
-                    m.Tx("_FaceAtlas", atlas); mouthCols(m); return m;
+                    var m = Object.Instantiate(mo); m.name = $"{mo.name}_GlitchSR1_{ex}"; m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                    var atlas = Res.Tex(GlitchAtlas(ex), true, false);
+                    if (atlas != null) m.Tx("_FaceAtlas", atlas);
+                    mouthCols(m); return m;
                 });
         }
 
@@ -649,6 +644,7 @@ namespace ClassicSlimes
             if (!blended) ClearRadiant(d);   // CottonForge builds real radiant variants: they get the shell too
             var s = SlimeFactory.Spec("Mosaic");
             var apps = d.AppearancesDefault;
+            if (apps == null || apps.Length == 0) { Behaviours.Add<MosaicSlime>(d); return; }
             for (int ai = 0; ai < (blended ? apps.Length : 1); ai++)
             try
             {
@@ -667,7 +663,7 @@ namespace ClassicSlimes
                         {
                             var dm = st?.DefaultMaterials;
                             if (dm == null || dm.Length != 1 || dm[0] == null || !dm[0].name.Contains("Mosaic")) continue;
-                            st.DefaultMaterials = new Il2CppReferenceArray<Material>(new[] { dm[0], coat });
+                            st.DefaultMaterials = Gc.Array(new[] { dm[0], coat });
                         }
                 }
                 else if (MosaicGlassMode == 0 && s != null && !HasElement(app, "MosaicShell"))

@@ -77,17 +77,26 @@ namespace ClassicSlimes
             return null;
         }
 
+        static readonly HashSet<IntPtr> _ownedMeshes = new();
+
         static GameObject Build(GameObject gordo, SkinnedMeshRenderer body, bool log)
         {
             var old = Find(gordo.transform, ShellName);
-            if (old != null) Object.DestroyImmediate(old.gameObject);
+            if (old != null)
+            {
+                var oldSmr = old.GetComponent<SkinnedMeshRenderer>();
+                if (oldSmr != null && oldSmr.sharedMesh != null && _ownedMeshes.Remove(oldSmr.sharedMesh.Pointer))
+                    Object.Destroy(oldSmr.sharedMesh);
+                Object.DestroyImmediate(old.gameObject);
+            }
             var mesh = Res.MeshCopy(MeshName);
             var mat = Glass();
-            if (mesh == null || mat == null) { Log.Warning("Mosaic gordo facets: " + (mesh == null ? "mesh " + MeshName : "glass material") + " missing"); return null; }
+            if (mesh == null || mat == null) { if (mesh != null) Object.Destroy(mesh); Log.Warning("Mosaic gordo facets: " + (mesh == null ? "mesh " + MeshName : "glass material") + " missing"); return null; }
             Flatten(mesh, Flat);
             var bones = new Transform[BoneNames.Length];
             for (int i = 0; i < bones.Length; i++)
-                if ((bones[i] = Find(gordo.transform, BoneNames[i])) == null) { Log.Warning("Mosaic gordo facets: no bone " + BoneNames[i]); return null; }
+                if ((bones[i] = Find(gordo.transform, BoneNames[i])) == null) { Object.Destroy(mesh); Log.Warning("Mosaic gordo facets: no bone " + BoneNames[i]); return null; }
+            _ownedMeshes.Add(mesh.Pointer);
             var bt = body.transform;
             var go = new GameObject(ShellName) { layer = body.gameObject.layer };
             go.transform.SetParent(bt.parent, false);
@@ -295,7 +304,8 @@ namespace ClassicSlimes
                 if (shell != null) shell.gameObject.SetActive(On);
                 if (body) ApplyBody(bodyR);
                 var ss = shell != null ? shell.localScale : Vector3.zero;
-                sb.Append($"\n  {g.name} active={g.activeInHierarchy} shell={(shell != null ? (shell.gameObject.activeSelf ? "on" : "off") : "-")} scale=({ss.x:F3}, {ss.y:F3}, {ss.z:F3}) body={bodyR.sharedMaterials[0]?.name}");
+                var bname = bodyR.sharedMaterials != null && bodyR.sharedMaterials.Length > 0 ? bodyR.sharedMaterials[0]?.name : "-";
+                sb.Append($"\n  {g.name} active={g.activeInHierarchy} shell={(shell != null ? (shell.gameObject.activeSelf ? "on" : "off") : "-")} scale=({ss.x:F3}, {ss.y:F3}, {ss.z:F3}) body={bname}");
             }
             return $"gordofacets {op}: on={On} scale={Scale:F3} fit={Fit} offset={Offset:F3} body={Body} drift={IrisDrift} flat={Flat:F2} shimmer={Shimmer} glass={(_glass != null ? _glass.name : "-")}, {n} gordos{sb}";
         }
