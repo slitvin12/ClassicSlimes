@@ -44,17 +44,17 @@ namespace ClassicSlimes
 
         public static readonly Dictionary<string, Material> Mats = new();
 
-        static SlimeAppearance App(SlimeSpec s) => s.Def.AppearancesDefault[0];
-        static SlimeAppearance PinkApp => Library.GetSlime("Pink").AppearancesDefault[0];
+        internal static SlimeAppearance App(SlimeSpec s) => s.Def.AppearancesDefault[0];
+        internal static SlimeAppearance PinkApp => Library.GetSlime("Pink").AppearancesDefault[0];
 
-        static void ClearRadiant(SlimeDefinition d)
+        internal static void ClearRadiant(SlimeDefinition d)
         {
             // Cotton clones Pink's definition, so the radiant variant would be a radiant *pink* slime.
             try { d.RadiantBase = null; d.RadiantLargo0 = null; d.RadiantLargo1 = null; } catch { }
         }
 
         /// <summary>Body material; an optional second one is drawn over the same mesh (SR2 does this for the radiant aura).</summary>
-        static void SetBodyMaterial(SlimeAppearance app, Material m, Material second = null)
+        internal static void SetBodyMaterial(SlimeAppearance app, Material m, Material second = null)
         {
             if (m == null) return;
             app.Structures[0].DefaultMaterials = Gc.Array(second != null ? new[] { m, second } : new[] { m });
@@ -435,7 +435,7 @@ namespace ClassicSlimes
         /// The gold/pink slime bodies scatter light through SR2's warm skin-like diffusion profile, which tinted the chrome
         /// pink and lifted its blacks to maroon. Rock/crystal slimes use a neutral one: copy that (exact hash values).
         /// </summary>
-        static void NeutralScatter(Material m)
+        internal static void NeutralScatter(Material m)
         {
             foreach (var n in new[] { "slimeRockBase", "slimeCrystalBase", "slimePhosphorBase" })
             {

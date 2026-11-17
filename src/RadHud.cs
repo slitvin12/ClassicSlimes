@@ -17,6 +17,39 @@ namespace ClassicSlimes
         static RadMeter _meter;
         static float _next, _nextFind, _prevRads = -1f, _recoverTick;
         static bool _logged;
+        static SECTR_PointSource _geiger;
+        static IntPtr _geigerPlayerPtr;
+
+        public static void AudioTick()
+        {
+            var sc = SceneContext.Instance;
+            var pl = U.Player;
+            bool exposed = Time.timeScale > 0f && sc != null && sc.PlayerState != null && pl != null && (Time.time - LastExposure) < 0.25f;
+            if (pl == null) { _geiger = null; _geigerPlayerPtr = IntPtr.Zero; return; }
+            try
+            {
+                if (_geiger == null || _geigerPlayerPtr != pl.Pointer)
+                {
+                    _geigerPlayerPtr = pl.Pointer;
+                    var abs = pl.GetComponent<PlayerRadAbsorber>() ?? pl.GetComponentInChildren<PlayerRadAbsorber>();
+                    if (abs != null && abs.RadAudio != null)
+                    {
+                        _geiger = abs.RadAudio;
+                        _geiger.Cue = Snd.RadGeiger;
+                        _geiger.Loop = true;
+                        _geiger.PlayOnStart = false;
+                        _geiger.Volume = 1f;
+                        _geiger.Pitch = 1f;
+                    }
+                    else
+                    {
+                        _geiger = Snd.Loop(pl, Snd.RadGeiger, "ClassicSlimesRadGeiger");
+                    }
+                }
+                if (_geiger != null) Snd.SetPlaying(_geiger, exposed);
+            }
+            catch { }
+        }
 
         static RadMeter Find()
         {

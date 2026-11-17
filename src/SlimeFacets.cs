@@ -44,18 +44,26 @@ namespace ClassicSlimes
         internal static int Version { get; private set; }
         static MelonLogger.Instance Log => ClassicSlimesMod.Log;
 
-        /// <summary>The plain Mosaic slime body (tiles or the smooth body), not a largo's tinted copy.</summary>
+        /// <summary>The plain Mosaic slime body (tiles or the smooth body, including Radiant Mosaic), not a largo's tinted copy.</summary>
         internal static bool IsPlainBody(Material m)
         {
             if (m == null) return false;
             var tiles = GordoFacets.Tiles; var smooth = GordoFacets.SmoothMat;
-            return tiles != null && m == tiles || smooth != null && m == smooth;
+            var rtiles = GordoFacets.RadiantTiles; var rsmooth = GordoFacets.RadiantSmoothMat;
+            return (tiles != null && m == tiles) || (smooth != null && m == smooth)
+                || (rtiles != null && m == rtiles) || (rsmooth != null && m == rsmooth)
+                || m.name.Contains("MosaicRadiant", StringComparison.Ordinal);
         }
 
         /// <summary>Puts the wanted body (smooth under the facets, else the tiles) on a plain Mosaic body renderer.</summary>
         internal static Material SwapBody(Renderer r, Material m)
         {
-            var want = On && Body == "smooth" ? GordoFacets.Smooth() : GordoFacets.Tiles;
+            bool radiant = (GordoFacets.RadiantTiles != null && m == GordoFacets.RadiantTiles)
+                || (GordoFacets.RadiantSmoothMat != null && m == GordoFacets.RadiantSmoothMat)
+                || m.name.Contains("MosaicRadiant", StringComparison.Ordinal);
+            var want = radiant
+                ? (On && Body == "smooth" ? GordoFacets.RadiantSmooth() : GordoFacets.RadiantTiles)
+                : (On && Body == "smooth" ? GordoFacets.Smooth() : GordoFacets.Tiles);
             if (want == null || want == m) return m;
             var mats = r.sharedMaterials;
             if (mats == null || mats.Length == 0) return m;
@@ -90,7 +98,8 @@ namespace ClassicSlimes
             if (mats == null || mats.Length == 0 || mats[0] == null) return;
             var m = mats[0];
             Material orig = null;
-            if (GordoFacets.SmoothMat != null && m == GordoFacets.SmoothMat) orig = GordoFacets.Tiles;
+            if (GordoFacets.RadiantSmoothMat != null && m == GordoFacets.RadiantSmoothMat) orig = GordoFacets.RadiantTiles;
+            else if (GordoFacets.SmoothMat != null && m == GordoFacets.SmoothMat) orig = GordoFacets.Tiles;
             else if (TileOriginals.TryGetValue(m.Pointer, out var t) && t != null) orig = t;
             if (orig == null || orig == m) return;
             mats[0] = orig;

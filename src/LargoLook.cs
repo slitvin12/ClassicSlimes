@@ -50,11 +50,24 @@ namespace ClassicSlimes
             return info != null && !info.Legacy;
         }
 
-        // SR1 material values (extract/materials.txt). Never overwrite a radiant variant's own palette.
+        // SR1 material values (extract/materials.txt). Preserve radiant variant palette while restoring Boom cracks / rings / radiant shader.
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void ClassicRad(CottonLibrary.Forge.LargoBuild c)
         {
-            if (c.IsRadiant || c.BodyMaterial == null) return;
+            if (c.BodyMaterial == null) return;
+            if (c.IsRadiant)
+            {
+                if (c.Has("Boom"))
+                {
+                    c.BodyMaterial.Col("_CrackColor", new Color(0.28f, 0.96f, 1.00f));
+                    c.BodyMaterial.Flt("_CrackNoiseSpeed", 0.25f); c.BodyMaterial.Flt("_CrackAmount", 0.4821f);
+                    c.BodyMaterial.Flt("_CrackColorRange", -0.1f);
+                }
+                if (Visuals.RingMarked(c.BodyMaterial))
+                    Visuals.RingtailMarkings(c.BodyMaterial, c.Palette.Top, c.Palette.Middle, c.Palette.Bottom);
+                ApplyRadiantLargo(c);
+                return;
+            }
             Color top, mid, bottom;
             if (c.Has("Pink"))
             {
@@ -223,13 +236,37 @@ namespace ClassicSlimes
             return null;
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ApplyRadiantLargo(CottonLibrary.Forge.LargoBuild c) => ApplyRadiantLargoMat(c, c?.BodyMaterial);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ApplyRadiantLargoMat(CottonLibrary.Forge.LargoBuild c, Material mat)
+        {
+            if (c == null || !c.IsRadiant || mat == null) return;
+            if (!mat.IsKeywordEnabled("_ENABLERADIANTEFFECT_ON"))
+                RadiantLooks.EnableRadiantOnBody(mat, c.Palette.Top, c.Palette.Middle, c.Palette.Bottom, 0.55f);
+        }
+
         // Rad: green body and green partner parts (SR1). Pink, Boom, Phosphor and Honey keep their own colours
-        // (recipes); Quantum paints the lime swirl itself.
+        // (recipes); Quantum paints the lime swirl itself. Radiant variants keep CottonForge's radiant palette + glow.
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void RadBuild(CottonLibrary.Forge.LargoBuild c)
         {
-            if (c.IsRadiant || c.Largo == null) return;
+            if (c.Largo == null) return;
             Visuals.RadLargoSurface(c.BodyMaterial, c.Has("Phosphor"));
+            if (c.IsRadiant)
+            {
+                bool radSideIsRadiant = (c.RadiantSide == 0 ? c.First : c.Second)?.name == "Rad";
+                if (!c.Has("Quantum") && !c.Has("Mosaic"))
+                {
+                    if (radSideIsRadiant && c.Appearance != null && c.Appearance._face != null)
+                        c.Appearance._face = RadiantLooks.RadLargoRadiantFace(c.Appearance._face);
+                    else
+                        ApplyRadFace(c);
+                }
+                ApplyRadiantLargo(c);
+                return;
+            }
             if (!c.Has("Quantum") && !c.Has("Mosaic")) ApplyRadFace(c);
             if (c.Has("Pink") || c.Has("Boom") || c.Has("Phosphor") || c.Has("Honey") || c.Has("Quantum")
                 || c.Has("Tabby") || c.Has("Rock") || c.Has("Ringtail") || c.Has("Mosaic")) return;
@@ -250,11 +287,11 @@ namespace ClassicSlimes
         }
 
         // Quantum: golden body with the SR1 swirl, golden partner parts. Pink stays pink and Rad lime (with the swirl),
-        // Boom keeps its red cracked body.
+        // Boom keeps its red cracked body. Radiant variants preserve the radiant palette while keeping the Quantum swirl.
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void QuantumBuild(CottonLibrary.Forge.LargoBuild c)
         {
-            if (c.IsRadiant || c.Largo == null || c.BodyMaterial == null) return;
+            if (c.Largo == null || c.BodyMaterial == null) return;
             var bodyMat = c.BodyMaterial;
             if (bodyMat.shader == null || !bodyMat.shader.name.StartsWith("SR/AMP/Slime/Body"))
             {
@@ -276,6 +313,21 @@ namespace ClassicSlimes
                     }
                     bodyMat = rep;
                 }
+            }
+            if (c.IsRadiant)
+            {
+                var topR = c.Palette.Top;
+                var midR = c.Palette.Middle;
+                var botR = c.Palette.Bottom;
+                var ringsR = Visuals.RingMarked(bodyMat)
+                    ? new Material(bodyMat) { name = bodyMat.name + "_rings", hideFlags = HideFlags.DontUnloadUnusedAsset }
+                    : null;
+                Visuals.QuantumSurface(bodyMat, BodyMesh(c), topR, midR, botR);
+                if (c.Has("Boom")) bodyMat.Col("_CrackColor", Color.Lerp(topR, Color.white, 0.35f));
+                else Paint(c, topR, midR, botR, 0.18f, bodyMat);
+                if (ringsR != null) KeepRings(c, ringsR, topR, midR, botR);
+                ApplyRadiantLargoMat(c, bodyMat);
+                return;
             }
             if (c.Has("Boom"))
             {
@@ -358,7 +410,7 @@ namespace ClassicSlimes
             CottonLibrary.Forge.LargoRecipe.For("Quantum", "Mosaic").Body("Pink").ColorsOf("Quantum");
             // Mosaic: the partner's body and colours (SR1: a pink, red, amber ... mosaic, not a blue blend); MosaicLargo turns
             // the body AND its parts into coated, shimmering glass tiles. "Second" = the other parent's palette.
-            CottonLibrary.Forge.LargoStyle.Of("Mosaic").Body(Low).Face(Low).Colors(CottonLibrary.Forge.LargoColorMode.Second).KeepOwnColors("*");
+            CottonLibrary.Forge.LargoStyle.Of("Mosaic").Body(Low).Face(Low).Colors(CottonLibrary.Forge.LargoColorMode.Second).KeepOwnColors("*").OnBuild(ApplyRadiantLargo);
         }
     }
 }

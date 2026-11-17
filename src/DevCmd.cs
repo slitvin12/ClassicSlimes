@@ -118,9 +118,13 @@ namespace ClassicSlimes
                 case "texdump": TexDump(a[1], a.Length > 2 ? a[2] : "_MainTex"); break;
                 case "glitchface":
                     {
+                        bool sr1 = a.Length < 2 || a[1] != "sr2";
                         var sp = SlimeFactory.Spec("Glitch");
-                        var f = Visuals.GlitchFace(a.Length < 2 || a[1] != "sr2");
-                        if (sp?.Def != null && f != null) { sp.Def.AppearancesDefault[0]._face = f; GlitchSlime.ReapplyAll(); }
+                        var f = Visuals.GlitchFace(sr1);
+                        if (sp?.Def != null && f != null) { sp.Def.AppearancesDefault[0]._face = f; }
+                        var rf = RadiantLooks.GlitchFace(sr1);
+                        if (sp?.Def?.RadiantBase != null && rf != null) { sp.Def.RadiantBase._face = rf; }
+                        GlitchSlime.ReapplyAll();
                         break;
                     }
                 case "radhud": RadHud.Offset = new Vector2(F(a, 1, 0f), F(a, 2, 78f)); RadHud.Place(); break;

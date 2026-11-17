@@ -6,7 +6,7 @@
 
 > *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.0 / 2.1.0-rc4 co-op support.
 
-**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.5 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
+**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.6 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
 
 ## Установка
 Нужны только **Slime Rancher 2** и **MelonLoader 0.7+**. **Slime Rancher 1 не нужен:** модели, текстуры, звуки и
@@ -20,12 +20,22 @@
    `CottonLibrary.dll` одновременно нельзя). CottonForge — прямая замена: другие Cotton-моды работают без пересборки.
 3. Скачать `ClassicSlimes.dll` из [релиза](https://github.com/slitvin12/ClassicSlimes/releases/latest) и положить
    туда же. Итог: `Mods\CottonLibrary.dll` + `Mods\ClassicSlimes.dll`.
-4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.5`.
+4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.6`.
    Первый показ главного меню на ~10 с дольше обычного — генерируются ларго.
 
 Версии 1.2.x–1.3.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
 должен запускаться без этих стилей, но такая связка в 1.2.x–1.3.x не проверялась.
 Удаление — убрать `ClassicSlimes.dll`; слаймы и ларго мода при этом пропадут из сохранения (см. «Известные проблемы»).
+
+## Новое в 1.3.6
+
+- **Лучистые (Radiant) варианты SR2 1.3.0.** Добавлены полноценные `RadiantBase`-внешности для **Mosaic** (жемчужно-опаловые призматические грани + переливчатый `RadiantGlass`), **Rad** (черенковский кобальт-голубой купол и частицы), **Glitch** (солнечно-золотой киберпанк с маскировкой под лучистых слаймов и 4× наградой в Ньюбаксах) и **Quicksilver** (платиново-розовый дихроичный хром + плазменный перегруз), а также поддержка лучистых ларго через CottonForge (с сохранением квантовой спирали на лучистых `Quantum`-ларго).
+- **Обновлённая иллюстрация Слаймопедии Mosaic.** Заменены `pediaSlimeMosaic.png` и `iconSlimeMosaic.png` на новый стикер в стиле SR2.
+- **Возврат блеска Mosaic-ларго.** Восстановлена до-1.3.5 яркость фасетного стекла, интенсивность радужных бликов (`FlareMat`) и мерцания плиток (`_GlossPower`, `_BodyLightingContribution`) для всех мозаичных ларго.
+- **Плавный наземный бег Glitch при панике.** Панический побег перенесён в `FixedUpdate` без вертикальных подскоков (`FleeLift = 0`), со скользящим обходом валунов, крутых склонов и обрывов (`CanFleeAlong`), съездом со скал вниз и ограничением высоты телепортаций.
+- **Видимая аура Rad-гордо.** Двусторонний `SimpleGlass`-купол (`GordoDome`, `_CullMode = 0`) радиусом 6–9 м, внутреннее ядерное свечение (`RadGordoCore`) и масштабируемые в иерархии гордо частицы `RadMotes`.
+- **Звук радиации Rad-слаймов.** RMS-нормализация `radslime_aura_03`, исправлены параметры 3D-лупа `SECTR_PointSource`/`SECTR_AudioCue` (`HDR = false`, линейное затухание, без `PlayOnStart`), и подключён счётчик Гейгера `player_radiation_sickness` (2D-луп при облучении игрока).
+- **Исправления посадки и роста фазового (квантового) лимона в огороде.** Триггер кроны перенесён на слой `Layers.ActorTrigger` и считается в локальных координатах (без деления на нулевой скейл при `TweenScaleUpItem`), разделены `model_pogofruit` и `FX Aura`, незрелые завязи больше не мигают голограммой, осыпавшиеся при сносе/апгрейде грядки `LemonPhase` исчезают вместо зависания, а сохранения, `DELUXE_GARDEN` и переработка дронами/сном (`GetFastForwardGroups`) корректно выдают `LemonFruit`.
 
 ## Новое в 1.3.5
 
@@ -97,7 +107,7 @@
 | Mosaic | Ember Valley: середина песчаного плато между скальными столбами, в 15 м от обрыва, ~30 м от Rock-гордо (−316, 35, 545) | овощи |
 
 Тело и лицо — как у слайма мода, названия — «Радиоактивный / Квантовый / Мозаичный гордо» (EN/RU), в слаймопедии —
-общая статья «Гордо». Rad-гордо, как gordoRad в SR1, окружён радиационной аурой (радиус 12,8 м, растёт вместе с
+общая статья «Гордо». Rad-гордо, как gordoRad в SR1, окружён радиационной аурой (радиус 6–9 м, растёт вместе с
 гордо, без периодических расширений). Съев `GordoFoodCount` штук еды (по умолчанию 50, как в SR1), гордо лопается:
 вылетают слаймы его типа (в тесте — 12) и ящик его зоны. Сколько съедено и лопнул ли гордо, хранится в сохранении,
 как у ванильных гордо; лопнувший больше не появляется.

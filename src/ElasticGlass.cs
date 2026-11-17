@@ -51,7 +51,7 @@ namespace ClassicSlimes
                 if (m == null) continue;
                 if (m.name == "QuantumHoloBody") { seen.Add(r.Pointer); continue; }
                 // Tile bodies (slime body shader) plus every glass part of a mosaic largo (ears, spikes, rings, petals).
-                if (!m.name.Contains("Mosaic") || m.shader == null) continue;
+                if (!m.name.Contains("Mosaic") || m.shader == null || !m.shader.name.StartsWith("SR/AMP/Slime/", StringComparison.Ordinal)) continue;
                 if (m.shader.name != "SR/AMP/Slime/Body" && !m.name.Contains("_MosaicPart")) continue;
                 var skin = r.TryCast<SkinnedMeshRenderer>();
                 var filter = skin == null ? r.GetComponent<MeshFilter>() : null;
@@ -376,7 +376,10 @@ namespace ClassicSlimes
                 }
                 bool isLargo = false;
                 try { var eat = source.GetComponentInParent<Il2Cpp.SlimeEat>(); isLargo = eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo; } catch { }
-                Renderer.sharedMaterial = (Shell != null ? GordoFacets.Glass(isLargo) : null) ?? Visuals.MosaicElasticGlassMaterial(isLargo);
+                bool isRadMosaic = material != null && material.name.Contains("MosaicRadiant", StringComparison.Ordinal);
+                Renderer.sharedMaterial = (Shell != null ? (isRadMosaic ? GordoFacets.RadiantGlass() : GordoFacets.Glass(isLargo)) : null)
+                    ?? (isRadMosaic ? GordoFacets.RadiantGlass() : null)
+                    ?? Visuals.MosaicElasticGlassMaterial(isLargo);
                 Renderer.shadowCastingMode = ShadowCastingMode.Off; Renderer.receiveShadows = false;
                 Renderer.reflectionProbeUsage = source.reflectionProbeUsage;
                 Renderer.lightProbeUsage = source.lightProbeUsage; Renderer.renderingLayerMask = source.renderingLayerMask;

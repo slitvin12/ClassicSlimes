@@ -169,6 +169,7 @@ namespace ClassicSlimes
                 catch (Exception e) { ClassicSlimesMod.Log.Warning("Quicksilver diet: " + e.Message); }
             }
             try { Loc.PreRegisterLargos(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Largo names: " + e.Message); }
+            try { RadiantLooks.BuildAll(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Radiant builds: " + e); }
             Spawns.Register();
         }
 

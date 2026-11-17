@@ -365,35 +365,80 @@ namespace ClassicSlimes
     public static class Snd
     {
         static readonly Dictionary<string, SECTR_AudioCue> _cues = new();
-        static SECTR_AudioCue _tpl;
+        static SECTR_AudioCue _tpl, _tplLoop;
 
-        static SECTR_AudioCue Template()
+        static SECTR_AudioCue Template(bool loop = false)
         {
+            if (loop)
+            {
+                if (_tplLoop != null) return _tplLoop;
+                foreach (var n in new[] { "FireAura", "TangleCloudAura", "DreamLanternAuraIdle", "CycloneLoop" })
+                {
+                    foreach (var c in Resources.FindObjectsOfTypeAll<SECTR_AudioCue>())
+                        if (c != null && c.name == n && c.Loops) { _tplLoop = c; return _tplLoop; }
+                }
+                foreach (var c in Resources.FindObjectsOfTypeAll<SECTR_AudioCue>())
+                    if (c != null && c.Loops && c.AudioClips != null && c.AudioClips.Count > 0 && !c.name.StartsWith("ClassicSlimes")) { _tplLoop = c; return _tplLoop; }
+            }
             if (_tpl != null) return _tpl;
             try { _tpl = Library.GetSlime("Pink")?.Sounds?._voiceFunClipDefinition?._audioCue; } catch { }
             if (_tpl == null)
                 foreach (var c in Resources.FindObjectsOfTypeAll<SECTR_AudioCue>())
-                    if (c != null && c.AudioClips != null && c.AudioClips.Count > 0 && !c.Loops) { _tpl = c; break; }
+                    if (c != null && c.AudioClips != null && c.AudioClips.Count > 0 && !c.Loops && !c.name.StartsWith("ClassicSlimes")) { _tpl = c; break; }
             return _tpl;
         }
 
-        public static SECTR_AudioCue Cue(string key, bool loop, float volume, float maxDistance, params string[] clips)
+        public static SECTR_AudioCue Cue(string key, bool loop, float volume, float maxDistance, params string[] clips) =>
+            BuildCue(key, loop, volume, maxDistance, false, clips);
+
+        public static SECTR_AudioCue Cue2D(string key, bool loop, float volume, params string[] clips) =>
+            BuildCue(key, loop, volume, 0f, true, clips);
+
+        static SECTR_AudioCue BuildCue(string key, bool loop, float volume, float maxDistance, bool twoD, params string[] clips)
         {
             if (_cues.TryGetValue(key, out var c) && c != null) return c;
-            var tpl = Template();
+            var tpl = Template(loop);
             if (tpl == null) return null;
             var list = new Il2CppSystem.Collections.Generic.List<SECTR_AudioCue.ClipData>();
-            foreach (var n in clips) { var clip = Res.Clip(n); if (clip != null) list.Add(new SECTR_AudioCue.ClipData(clip)); }
+            foreach (var n in clips)
+            {
+                var clip = Res.Clip(n);
+                if (clip == null) continue;
+                var cd = new SECTR_AudioCue.ClipData(clip);
+                cd.Volume = 1f;
+                list.Add(cd);
+            }
             if (list.Count == 0) return null;
             c = Object.Instantiate(tpl);
             c.name = "ClassicSlimes_" + key;
             c.hideFlags = HideFlags.DontUnloadUnusedAsset;
             try { c.Template = null; } catch { }
             c.AudioClips = list;
+            c.HDR = false;
+            c.PlayProbability = 1f;
+            c.ChanceToPlay = 1f;
+            c.Delay = Vector2.zero;
             c.Loops = loop;
-            if (volume > 0f) c.Volume = new Vector2(volume, volume);
-            c.Pitch = loop ? new Vector2(1f, 1f) : new Vector2(0.94f, 1.06f);
-            if (maxDistance > 0f) c.MaxDistance = maxDistance;
+            c.Volume = volume > 0f ? new Vector2(volume, volume) : Vector2.one;
+            c.Pitch = loop ? Vector2.one : new Vector2(0.94f, 1.06f);
+            c.Spatialization = twoD ? SECTR_AudioCue.Spatializations.Simple2D : SECTR_AudioCue.Spatializations.Local3D;
+            if (loop)
+            {
+                c.PlaybackMode = SECTR_AudioCue.PlaybackModes.Loop;
+                c.Falloff = SECTR_AudioCue.FalloffTypes.Linear;
+                float dist = maxDistance > 0f ? maxDistance : 26f;
+                c.MinDistance = Mathf.Min(5f, dist * 0.32f);
+                c.MaxDistance = dist;
+                c.MaxInstances = 16;
+                c.ProximityLimit = 0;
+                c.FadeInTime = 0.15f;
+                c.FadeOutTime = 0.25f;
+            }
+            else if (maxDistance > 0f)
+            {
+                c.MaxDistance = maxDistance;
+                c.MinDistance = Mathf.Min(3f, maxDistance * 0.2f);
+            }
             _cues[key] = c;
             return c;
         }
@@ -425,6 +470,10 @@ namespace ClassicSlimes
             var src = go.AddComponent<SECTR_PointSource>();
             src.Cue = cue;
             src.Loop = true;
+            src.PlayOnStart = false;
+            src.RestartLoopsOnEnabled = false;
+            src.Volume = 1f;
+            src.Pitch = 1f;
             go.SetActive(true);
             return src;
         }
@@ -440,8 +489,9 @@ namespace ClassicSlimes
             catch { }
         }
 
-        // shared cues (tuned down so corrals of Rad/Mosaic largos are never overly loud)
-        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.18f, 26f, "radslime_aura_03");
+        // shared cues (RadAura uses IsAudioLeader singleton so 0.80f plays clearly; Geiger plays 2D on player exposure)
+        public static SECTR_AudioCue RadAura => Cue("radAura", true, 0.80f, 28f, "radslime_aura_03");
+        public static SECTR_AudioCue RadGeiger => Cue2D("radGeiger", true, 0.62f, "player_radiation_sickness");
         public static SECTR_AudioCue QuantumWarp => Cue("quantumWarp", false, 0.9f, 40f, "quantumslime_warp_01", "quantumslime_warp_05");
         public static SECTR_AudioCue QuantumGhost => Cue("quantumGhost", false, 0.6f, 25f, "quantumslime_idle_07");
         public static SECTR_AudioCue QuantumGhostPop => Cue("quantumGhostPop", false, 0.6f, 25f, "quantumslime_despawn_03b");

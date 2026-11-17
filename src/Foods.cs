@@ -98,6 +98,7 @@ namespace ClassicSlimes
                     if (!enabled) continue;
                     var group = f.Fruit ? Library.fruits : Library.veggies;
                     AddTo(group, t);
+                    SlimeFactory.RegisterGroupByName("IdentifiableTypesGroup", t);
                     SlimeFactory.RegisterGroupByName(f.Fruit ? "FruitQuantumCloudGroup" : "VeggieQuantumCloudGroup", t);
                     if (t.groupType == null) t.groupType = group;
                     Library.MakeVaccable(t);
@@ -127,8 +128,8 @@ namespace ClassicSlimes
         }
 
         // SR2's dormant veggieOcaoca, veggieParsnip and fruitLemon prefabs carry a dummy empty MeshFilter (sharedMesh=null)
-        // on the root GameObject above model_ocaoca / model_parsnip / model_pogofruit, causing GordoSnare.AttachBait to
-        // grab the empty root MeshFilter first and render invisible bait.
+        // on the root GameObject above model_ocaoca / model_parsnip / model_pogofruit. Removing it fails on persistent assets
+        // and breaks QuantumDroneResourceFX, so instead assign the real mesh onto the empty root MeshFilter.
         static void FixFoodRootMeshes()
         {
             foreach (var f in All)
@@ -136,10 +137,20 @@ namespace ClassicSlimes
                 var prefab = f.Type != null ? f.Type.prefab : null;
                 if (prefab == null) continue;
                 var rootMf = prefab.GetComponent<MeshFilter>();
-                if (rootMf != null && rootMf.sharedMesh == null && prefab.GetComponent<MeshRenderer>() == null)
+                if (rootMf == null || rootMf.sharedMesh != null) continue;
+                Mesh childMesh = null;
+                foreach (var mf in prefab.GetComponentsInChildren<MeshFilter>(true))
                 {
-                    Object.DestroyImmediate(rootMf);
-                    ClassicSlimesMod.Log.Msg($"  removed empty root MeshFilter on {prefab.name} for GordoSnare visibility");
+                    if (mf == null || mf == rootMf || mf.sharedMesh == null) continue;
+                    if (mf.name.IndexOf("FX", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    childMesh = mf.sharedMesh;
+                    break;
+                }
+                if (childMesh == null && f.Ident == "LemonFruit") childMesh = Res.Mesh("phaseLemon");
+                if (childMesh != null)
+                {
+                    rootMf.sharedMesh = childMesh;
+                    ClassicSlimesMod.Log.Msg($"  populated empty root MeshFilter on {prefab.name} -> {childMesh.name}");
                 }
             }
         }
@@ -191,6 +202,7 @@ namespace ClassicSlimes
 
         public static void EnsurePediaDirectorLinks()
         {
+            ClearPhaseFromIgnoreOnLoad(SceneContext.Instance != null ? SceneContext.Instance.GameModel : null);
             foreach (var pd in Resources.FindObjectsOfTypeAll<PediaDirector>())
             {
                 if (pd == null || pd._identDict == null) continue;
@@ -229,6 +241,10 @@ namespace ClassicSlimes
 
         static bool LemonMat(Material m) => m != null && (m.name ?? "").StartsWith("phaseLemon", StringComparison.OrdinalIgnoreCase);
 
+        static bool IsFxObj(GameObject go, Material m) =>
+            (go != null && go.name.IndexOf("FX", StringComparison.OrdinalIgnoreCase) >= 0)
+            || (m != null && (m.name ?? "").StartsWith("fx ", StringComparison.OrdinalIgnoreCase));
+
         /// <summary>Empty lemon MeshFilters under root get the SR1 mesh (all = any empty renderer, e.g. tree spawn joints).</summary>
         internal static int FixLemon(GameObject root, bool all)
         {
@@ -238,10 +254,18 @@ namespace ClassicSlimes
             int n = 0;
             foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
             {
-                if (mf == null || mf.sharedMesh != null) continue;
+                if (mf == null) continue;
                 var mr = mf.GetComponent<MeshRenderer>();
-                if (mr == null) continue;
+                if (mr == null || mf.name == PhaseHoloName) continue;
                 var mat = mr.sharedMaterial;
+                bool isFx = IsFxObj(mf.gameObject, mat);
+                if (isFx)
+                {
+                    // FX Aura keeps its "fx phaseLemon" quantum agitation shader; only supply a mesh if missing.
+                    if (all && mf.sharedMesh == null) { mf.sharedMesh = mesh; n++; }
+                    continue;
+                }
+                if (mf.sharedMesh != null) continue;
                 if (!LemonMat(mat))
                 {
                     if (!all || (mat != null && mat.name.IndexOf("lemon", StringComparison.OrdinalIgnoreCase) < 0 && mf.name.IndexOf("SpawnJoint", StringComparison.OrdinalIgnoreCase) < 0)) continue;
@@ -280,7 +304,27 @@ namespace ClassicSlimes
         const string PhasorName = "ClassicSlimes_LemonPhasor", PhaseHoloName = "ClassicSlimes_PhaseHolo";
         const string PhaseLemonKey = "1051811259578094a8004e87615f38b6";   // LemonPhase.asset in the addressables catalog
 
-        public class PhaseLemon { public GameObject Go; public IntPtr Ptr; public MeshRenderer Solid; public float Next; public bool On, Seen; }
+        public class PhaseLemon { public GameObject Go, HoloGo; public IntPtr Ptr; public MeshRenderer Solid; public ResourceCycle Rc; public float Next; public bool On, Seen, Ripe; }
+
+        internal static void ClearPhaseFromIgnoreOnLoad(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel gm)
+        {
+            if (gm == null || _phase == null) return;
+            try
+            {
+                if (gm.ignoreOnLoad != null)
+                {
+                    gm.ignoreOnLoad._memberTypes?.Remove(_phase);
+                    var rt = gm.ignoreOnLoad.GetRuntimeObject();
+                    if (rt != null && rt.IsMember(_phase))
+                    {
+                        rt._memberTypes?.Remove(_phase);
+                        rt._memberIndices?.Remove(_phase);
+                    }
+                }
+                if (gm.phaseLemonIdent == _phase) gm.phaseLemonIdent = null;
+            }
+            catch { }
+        }
 
         static void SetupPhaseLemonLoadOnly(Dictionary<string, IdentifiableType> byName)
         {
@@ -333,9 +377,21 @@ namespace ClassicSlimes
                 rc.DestroyFX = _phaseOutFx;
             }
             FixLemon(p.prefab, false);
+            var lemonMesh = Res.Mesh("phaseLemon");
             // solid body = the real lemon look (PhaseLemonTree flickers it and adds a scanline shell)
             foreach (var mr in p.prefab.GetComponentsInChildren<MeshRenderer>(true))
-                if (mr != null && _lemonMat != null && LemonMat(mr.sharedMaterial)) mr.sharedMaterial = _lemonMat;
+            {
+                if (mr == null || mr.name == PhaseHoloName) continue;
+                if (IsFxObj(mr.gameObject, mr.sharedMaterial))
+                {
+                    var fxMf = mr.GetComponent<MeshFilter>();
+                    if (fxMf != null && fxMf.sharedMesh == null && lemonMesh != null) fxMf.sharedMesh = lemonMesh;
+                    continue;
+                }
+                var bodyMf = mr.GetComponent<MeshFilter>();
+                if (bodyMf != null && bodyMf.sharedMesh == null && lemonMesh != null) bodyMf.sharedMesh = lemonMesh;
+                if (_lemonMat != null && (LemonMat(mr.sharedMaterial) || mr.sharedMaterial == null)) mr.sharedMaterial = _lemonMat;
+            }
             int n = 0;
             if (Cfg.PhaseLemonTrees.Value)
                 foreach (var d in Resources.FindObjectsOfTypeAll<ResourceGrowerDefinition>()) if (PhaseGrower(d)) n++;
@@ -354,21 +410,28 @@ namespace ClassicSlimes
             return any;
         }
 
+        static Vector3 LocalPosIn(Transform root, Transform node)
+        {
+            var p = Vector3.zero;
+            for (var cur = node; cur != null && cur != root; cur = cur.parent)
+                p = cur.localPosition + cur.localRotation * Vector3.Scale(p, cur.localScale);
+            return p;
+        }
+
         static void AddPhasor(SpawnResource sr)
         {
             if (sr.transform.Find(PhasorName) != null) return;
             var go = new GameObject(PhasorName);
-            int fruitLayer = _lemon.prefab != null ? _lemon.prefab.layer : 0;
-            // Ignore Raycast keeps the crown trigger out of vac / interaction raycasts
-            go.layer = Physics.GetIgnoreLayerCollision(2, fruitLayer) ? sr.gameObject.layer : 2;
+            // ActorTrigger collides with both Layers.Actor and Layers.Launched at point-blank ranch range, and is excluded from vac/UI/gadget raycasts.
+            go.layer = Layers.ActorTrigger;
             go.transform.SetParent(sr.transform, false);
             Vector3 c = new Vector3(0f, 3.0f, 0f);
-            float r = 2.4f;
+            float r = 2.2f;
             var joints = sr.SpawnJoints;
             if (joints != null && joints.Length > 0)
             {
                 var pts = new List<Vector3>();
-                foreach (var j in joints) if (j != null) pts.Add(sr.transform.InverseTransformPoint(j.transform.position));
+                foreach (var j in joints) if (j != null) pts.Add(LocalPosIn(sr.transform, j.transform));
                 if (pts.Count > 0)
                 {
                     var sum = Vector3.zero;
@@ -376,7 +439,7 @@ namespace ClassicSlimes
                     c = sum / pts.Count;
                     float m = 0f;
                     foreach (var q in pts) m = Mathf.Max(m, (q - c).magnitude);
-                    r = Mathf.Clamp(m + 0.9f, 1.5f, 6f);
+                    r = Mathf.Clamp(m + 0.55f, 1.4f, 2.9f);
                 }
             }
             go.transform.localPosition = c;
@@ -499,6 +562,8 @@ namespace ClassicSlimes
             catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon fx: " + e.Message); }
         }
 
+        static bool _swappingPhaseLemon;
+
         /// <summary>SR1 LemonPhasor.OnTriggerEnter: a thrown fruit (not a lemon) knocks a ripe phasing lemon loose.</summary>
         internal static void OnPhaseTrigger(PhaseLemonTree tree, Collider col)
         {
@@ -521,9 +586,15 @@ namespace ClassicSlimes
             Vector3 pos = joint.transform.position;
             Quaternion rot = joint.transform.rotation;
             Vector3 fruitPos = go.transform.position;
-            try { body.GetComponent<ResourceCycle>()?.DetachFromJoint(); } catch { }
-            try { joint.connectedBody = null; } catch { }
-            CoopCompat.DestroySharedActor(body.gameObject, "ClassicSlimes.LemonPhasor", false);
+            bool prevSwap = _swappingPhaseLemon;
+            _swappingPhaseLemon = true;
+            try
+            {
+                try { body.GetComponent<ResourceCycle>()?.DetachFromJoint(); } catch { }
+                try { joint.connectedBody = null; } catch { }
+                CoopCompat.DestroySharedActor(body.gameObject, "ClassicSlimes.LemonPhasor", false);
+            }
+            finally { _swappingPhaseLemon = prevSwap; }
             var sg = tree.Sr.GetComponentInParent<Il2CppMonomiPark.SlimeRancher.Regions.Region>()?.SceneGroup;
             var lemon = SpawnActor(_lemon, pos, rot, sg);
             if (lemon != null)
@@ -566,7 +637,7 @@ namespace ClassicSlimes
             MeshRenderer solid = null; MeshFilter mf = null;
             foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
             {
-                if (mr == null || mr.name == PhaseHoloName) continue;
+                if (mr == null || mr.name == PhaseHoloName || IsFxObj(mr.gameObject, mr.sharedMaterial)) continue;
                 var m = mr.sharedMaterial;
                 if (m == null || (m != _lemonMat && !LemonMat(m))) continue;
                 var f = mr.GetComponent<MeshFilter>();
@@ -574,28 +645,53 @@ namespace ClassicSlimes
                 solid = mr; mf = f; break;
             }
             if (solid == null) return null;
+            GameObject holoGo = solid.transform.Find(PhaseHoloName)?.gameObject;
             var holo = PhaseHoloMat;
-            if (holo != null && solid.transform.Find(PhaseHoloName) == null)
+            if (holo != null && holoGo == null)
             {
-                var h = new GameObject(PhaseHoloName);
-                h.layer = solid.gameObject.layer;
-                h.transform.SetParent(solid.transform, false);
-                h.transform.localScale = Vector3.one * 1.06f;
-                h.AddComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
-                var hr = h.AddComponent<MeshRenderer>();
+                holoGo = new GameObject(PhaseHoloName);
+                holoGo.layer = solid.gameObject.layer;
+                holoGo.transform.SetParent(solid.transform, false);
+                holoGo.transform.localScale = Vector3.one * 1.06f;
+                holoGo.AddComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
+                var hr = holoGo.AddComponent<MeshRenderer>();
                 hr.sharedMaterial = holo;
                 hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 hr.receiveShadows = false;
             }
-            solid.enabled = false;
-            return new PhaseLemon { Go = go, Ptr = go.Pointer, Solid = solid, Next = Time.time + U.Rand(0.1f, 0.8f) };
+            var rc = go.GetComponent<ResourceCycle>();
+            bool ripe = false;
+            try { ripe = rc == null || rc.GetState() == ResourceCycle.State.RIPE; } catch { ripe = true; }
+            solid.enabled = !ripe;
+            if (holoGo != null) holoGo.SetActive(ripe);
+            return new PhaseLemon { Go = go, HoloGo = holoGo, Ptr = go.Pointer, Solid = solid, Rc = rc, Ripe = ripe, Next = Time.time + U.Rand(0.1f, 0.8f) };
         }
 
         static int _holoFrame;
         static float _holoJump;
         static Vector2 _holoOfs;
 
-        /// <summary>Phasing look of the lemons on a tree: scanline shell, the solid body only flickers in now and then.</summary>
+        internal static void CleanupDetachedPhaseLemons(SpawnResource sr)
+        {
+            if (sr == null || _phase == null || _swappingPhaseLemon) return;
+            var joints = sr.SpawnJoints;
+            if (joints == null) return;
+            foreach (var j in joints)
+            {
+                var rb = j != null ? j.connectedBody : null;
+                if (rb == null) continue;
+                var ida = rb.GetComponent<IdentifiableActor>();
+                if (ida == null || ida.identType != _phase) continue;
+                var go = rb.gameObject;
+                var pos = go.transform.position;
+                try { rb.GetComponent<ResourceCycle>()?.DetachFromJoint(); } catch { }
+                try { j.connectedBody = null; } catch { }
+                PlayFx(_phaseOutFx, pos);
+                CoopCompat.DestroySharedActor(go, "ClassicSlimes.LemonPhaseDetached", false);
+            }
+        }
+
+        /// <summary>Phasing look of the lemons on a tree: scanline shell once ripe, and clean vanish if detached from tree.</summary>
         internal static void PhaseTick(PhaseLemonTree t)
         {
             float now = Time.time;
@@ -620,23 +716,38 @@ namespace ClassicSlimes
                             t.Lemons.Add(l);
                         }
                         l.Seen = true;
+                        bool ripe = true;
+                        if (l.Rc != null) { try { ripe = l.Rc.GetState() == ResourceCycle.State.RIPE; } catch { } }
+                        if (ripe != l.Ripe)
+                        {
+                            l.Ripe = ripe;
+                            if (l.HoloGo != null) l.HoloGo.SetActive(ripe);
+                            if (l.Solid != null) l.Solid.enabled = !ripe;
+                            l.On = !ripe;
+                        }
                     }
                 for (int i = t.Lemons.Count - 1; i >= 0; i--)
                 {
                     var l = t.Lemons[i];
                     if (l.Seen) continue;
-                    if (l.Go != null && l.Solid != null)
+                    // Detached outside OnPhaseTrigger (garden demolish / crop clear / DELUXE_GARDEN upgrade / expired): vanish cleanly instead of leaving unvaccable solid lemons on the plot.
+                    if (l.Go != null && !_swappingPhaseLemon)
+                    {
+                        var pos = l.Go.transform.position;
+                        if (_phaseOutFx != null) PlayFx(_phaseOutFx, pos);
+                        CoopCompat.DestroySharedActor(l.Go, "ClassicSlimes.LemonPhaseDetached", false);
+                    }
+                    else if (l.Go != null && l.Solid != null)
                     {
                         l.Solid.enabled = true;
-                        var h = l.Solid.transform.Find(PhaseHoloName);
-                        if (h != null) h.gameObject.SetActive(false);
+                        if (l.HoloGo != null) l.HoloGo.SetActive(false);
                     }
                     t.Lemons.RemoveAt(i);
                 }
             }
             foreach (var l in t.Lemons)
             {
-                if (now < l.Next || l.Solid == null) continue;
+                if (!l.Ripe || now < l.Next || l.Solid == null) continue;
                 l.On = !l.On;
                 l.Next = now + (l.On ? U.Rand(0.05f, 0.16f) : U.Rand(0.35f, 1.4f));
                 l.Solid.enabled = l.On;
@@ -771,20 +882,15 @@ namespace ClassicSlimes
 
         static bool InGroup(IdentifiableTypeGroup g, IdentifiableType t) { try { return g != null && t != null && g.IsMember(t); } catch { return false; } }
 
-        internal static void OnSpawnResourceAwake(SpawnResource sr)
+        internal static void OnSpawnResourceAwakePrefix(SpawnResource sr)
         {
             if (!Ready || sr == null) return;
             var def = sr._resourceGrowerDefinition;
             if (def == null) return;
-            // garden / wild lemon trees: their fruit spawn joints have no mesh either
-            if (def._primaryResourceType != null && def._primaryResourceType.name == "LemonFruit")
+            if (def._primaryResourceType != null && def._primaryResourceType.name == "LemonFruit" && _phase != null && Cfg.PhaseLemonTrees.Value)
             {
-                FixLemon(sr.gameObject, true);
-                if (_phase != null && Cfg.PhaseLemonTrees.Value)
-                {
-                    try { PhaseGrower(def); AddPhasor(sr); }
-                    catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon tree: " + e.Message); }
-                }
+                try { PhaseGrower(def); }
+                catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon grower: " + e.Message); }
             }
             if (!Cfg.WildFoods.Value) return;
             if (_mine.Contains(def.Pointer)) return;
@@ -826,11 +932,45 @@ namespace ClassicSlimes
                 _mine.Add(clone.Pointer);
             }
             sr._resourceGrowerDefinition = clone;
-            if (phase) { try { AddPhasor(sr); } catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon tree: " + e.Message); } }
             string k = scene + ":" + pick.Ident;
             Added.TryGetValue(k, out int c); Added[k] = c + 1;
             Spots.Add((sr, pick.Ident));
             if (Diag.Enabled && _logged++ < 8) ClassicSlimesMod.Log.Msg($"[food] {scene}/{sr.name} {def.name} -> {grow.name}");
+        }
+
+        internal static void OnSpawnResourceAwakePost(SpawnResource sr)
+        {
+            if (!Ready || sr == null) return;
+            var def = sr._resourceGrowerDefinition;
+            if (def == null) return;
+            if (def._primaryResourceType != null && def._primaryResourceType.name == "LemonFruit")
+            {
+                FixLemon(sr.gameObject, true);
+                if (_phase != null && Cfg.PhaseLemonTrees.Value)
+                {
+                    try { PhaseGrower(def); AddPhasor(sr); }
+                    catch (Exception e) { ClassicSlimesMod.Log.Warning("phase lemon tree: " + e.Message); }
+                }
+            }
+        }
+
+        internal static bool IsLemonTreeGrower(ResourceGrowerDefinition def) =>
+            def != null && def._primaryResourceType != null && def._primaryResourceType == _lemon;
+
+        internal static void ConvertFastForwardGroups(SpawnResource sr, ref Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup> result)
+        {
+            if (sr == null || result == null || _phase == null || _lemon == null || !IsLemonTreeGrower(sr._resourceGrowerDefinition)) return;
+            var list = new Il2CppSystem.Collections.Generic.List<SpawnResource.GatherGroup>();
+            bool changed = false;
+            var en = result.Cast<Il2CppSystem.Collections.IEnumerable>().GetEnumerator();
+            while (en.MoveNext())
+            {
+                var g = en.Current != null ? en.Current.TryCast<SpawnResource.GatherGroup>() : null;
+                if (g == null) continue;
+                if (g.rid == _phase) { list.Add(new SpawnResource.GatherGroup(sr, _lemon, g.rcount)); changed = true; }
+                else list.Add(g);
+            }
+            if (changed) result = list.Cast<Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup>>();
         }
         static int _logged;
         static readonly List<(SpawnResource sr, string food)> Spots = new();
@@ -858,8 +998,44 @@ namespace ClassicSlimes
     {
         static void Prefix(SpawnResource __instance)
         {
-            try { Foods.OnSpawnResourceAwake(__instance); }
-            catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource patch: " + e.Message); }
+            try { Foods.OnSpawnResourceAwakePrefix(__instance); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource prefix: " + e.Message); }
+        }
+
+        static void Postfix(SpawnResource __instance)
+        {
+            try { Foods.OnSpawnResourceAwakePost(__instance); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource postfix: " + e.Message); }
+        }
+    }
+
+    [HarmonyPatch(typeof(SpawnResource), nameof(SpawnResource.DropFromJoints))]
+    static class SpawnResourceDropFromJointsPatch
+    {
+        static void Prefix(SpawnResource __instance)
+        {
+            try { Foods.CleanupDetachedPhaseLemons(__instance); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource DropFromJoints: " + e.Message); }
+        }
+    }
+
+    [HarmonyPatch(typeof(SpawnResource), nameof(SpawnResource.GetFastForwardGroups))]
+    static class SpawnResourceFastForwardPatch
+    {
+        static void Postfix(SpawnResource __instance, ref Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup> __result)
+        {
+            try { Foods.ConvertFastForwardGroups(__instance, ref __result); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource GetFastForwardGroups: " + e.Message); }
+        }
+    }
+
+    [HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel), nameof(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel.Awake))]
+    static class GameModelPhaseLemonPatch
+    {
+        static void Postfix(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel __instance)
+        {
+            try { Foods.ClearPhaseFromIgnoreOnLoad(__instance); }
+            catch { }
         }
     }
 

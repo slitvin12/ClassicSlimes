@@ -64,8 +64,8 @@ namespace ClassicSlimes
                 }
                 m.Flt("_SmoothR", 0f); m.Flt("_SmoothG", 0f); m.Flt("_SmoothB", 0f);
             }
-            m.Flt("_GlossPower", tint > 0f ? 0.36f : 0.72f);
-            m.Flt("_BodyLightingContribution", tint > 0f ? 0.78f : 0.85f);
+            m.Flt("_GlossPower", 0.82f);
+            m.Flt("_BodyLightingContribution", 0.85f);
             NeutralScatter(m);
             MosaicShimmer(m, ramp[0], ramp[1], ramp[2], tint > 0f ? MosaicLargoShimmer : MosaicBaseShimmer);
             Mat.Track(m);
@@ -79,7 +79,7 @@ namespace ClassicSlimes
         /// Mosaic and on mosaic largos, and how much of the hue wheel is mixed into the slime's own tile colours.
         /// Tuned in game against the SR1 guide: the tiles keep their colour, rainbow tints run over them with the view.
         /// </summary>
-        public static float MosaicBaseShimmer = 0.22f, MosaicLargoShimmer = 0.045f, MosaicShimmerRainbow = 0.35f;
+        public static float MosaicBaseShimmer = 0.25f, MosaicLargoShimmer = 0.15f, MosaicShimmerRainbow = 0.4f;
 
         static bool _shimmerWarned;
 
@@ -133,7 +133,7 @@ namespace ClassicSlimes
         // Effects, auras and orbiting bits are not glass in SR1: they keep their material and get no coat.
         static readonly HashSet<string> MosaicBare = new(StringComparer.OrdinalIgnoreCase)
         { "MosaicShell", "HyperShades", "HyperAura", "SloomberCloud", "SloomberFX", "ShineRotator", "TwinOrbitals",
-          "ShadowFX", "ShadowAura", "FireFlames", "LuckyCatCoin" };
+          "ShadowFX", "ShadowAura", "FireFlames", "LuckyCatCoin", "RadiantAuraVFX", "RadiantSphereLight" };
 
         /// <summary>
         /// SR1 mosaic largos are glass all over: ears, spikes, rings, petals included. A part on the slime body shader
@@ -146,7 +146,7 @@ namespace ClassicSlimes
             if (!shader.StartsWith("SR/AMP/Slime/")) return null;
             var m = new Material(src) { name = src.name + "_MosaicPart", hideFlags = HideFlags.DontUnloadUnusedAsset };
             if (shader == "SR/AMP/Slime/Body") MosaicSurface(m, top, mid, bottom, tint, !m.IsKeywordEnabled("_BODYCOLORING_SLOOMBER"));
-            else { m.Flt("_GlossPower", tint > 0f ? 0.36f : 0.72f); Mat.Track(m); }
+            else { m.Flt("_GlossPower", 0.82f); m.Flt("_BodyLightingContribution", 0.85f); Mat.Track(m); }
             return m;
         }
 

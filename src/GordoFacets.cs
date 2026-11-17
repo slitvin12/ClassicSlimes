@@ -42,9 +42,13 @@ namespace ClassicSlimes
         // SR1 slime_gordo mesh bounds, in the same space as the SR1 shell (both children of Vibrating, unscaled)
         internal static readonly Vector3 Sr1BodyMin = new(-0.583f, -0.024f, -0.610f), Sr1BodyMax = new(0.583f, 0.980f, 0.552f);
         static Material _glass, _smooth, _tiles;
+        static Material _radTiles, _radSmooth, _radGlass;
         /// <summary>The Mosaic slime's tile body (Visuals "Mosaic"; the gordo body's own material before the smooth one).</summary>
         internal static Material Tiles => Visuals.Mats.TryGetValue("Mosaic", out var t) && t != null ? t : _tiles;
         internal static Material SmoothMat => _smooth;
+        /// <summary>The Radiant Mosaic slime's tile body (set by RadiantLooks).</summary>
+        internal static Material RadiantTiles { get => _radTiles; set => _radTiles = value; }
+        internal static Material RadiantSmoothMat => _radSmooth;
         static readonly int ReflectionId = Shader.PropertyToID("_Reflection");
         static MelonLogger.Instance Log => ClassicSlimesMod.Log;
 
@@ -184,31 +188,40 @@ namespace ClassicSlimes
             m.RecalculateTangents();
         }
 
-        static Material _largoGlass;
-        /// <summary>Copy of the Mosaic slime glass (tune live: flt/col MosaicFacets ...).</summary>
+        /// <summary>Copy of the Mosaic slime glass (tune live: flt/col MosaicFacets ...). Restored to pre-1.3.5 full brilliance for largos too.</summary>
         public static Material Glass(bool largo = false)
         {
-            if (largo && _largoGlass != null) return _largoGlass;
-            if (!largo && _glass != null) return _glass;
+            if (_glass != null) return _glass;
             var src = Visuals.MosaicElasticGlassMaterial(largo);
             if (src == null) return null;
             var m = Object.Instantiate(src);
-            m.name = largo ? "ClassicSlimes_MosaicLargoFacetGlass" : "ClassicSlimes_MosaicGordoGlass";
+            m.name = "ClassicSlimes_MosaicGordoGlass";
             m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-            if (largo)
-            {
-                m.Flt("_NormalStrength", 2.2f); m.Flt("_DistortionStrength", 0.9f);
-                m.Flt("_ReflectionFresnelPower", 2.4f); m.Flt("_ReflectionIntensity", 145f);
-                m.Flt("_Smoothness", 0.68f); m.Flt("_Opacity", 0.02f);
-                Visuals.Mats["MosaicLargoFacets"] = m;
-                _largoGlass = Mat.Track(m);
-                return _largoGlass;
-            }
             // SR1's big facets: deep bevels, strong refraction, a wide rainbow rim (tuned in game)
             m.Flt("_NormalStrength", 5f); m.Flt("_DistortionStrength", 2f); m.Flt("_ReflectionFresnelPower", 1.2f);
             Visuals.Mats["MosaicFacets"] = m;
             _glass = Mat.Track(m);
             return _glass;
+        }
+
+        /// <summary>Prismatic diamond-opal facet glass for Radiant Mosaic slimes.</summary>
+        public static Material RadiantGlass()
+        {
+            if (_radGlass != null) return _radGlass;
+            var src = Glass(false);
+            if (src == null) return null;
+            var m = Object.Instantiate(src);
+            m.name = "ClassicSlimes_MosaicRadiantGlass";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Col("_Color", new Color(0.95f, 0.85f, 1f, 0f));
+            m.Flt("_Opacity", 0.055f);
+            m.Flt("_DistortionStrength", 2.8f);
+            m.Flt("_ReflectionIntensity", 900f);
+            m.Flt("_ReflectionFresnelPower", 1.15f);
+            m.Col("_ReflectionTint", new Color(1f, 0.88f, 1f, 0f));
+            Visuals.Mats["MosaicRadiantFacets"] = m;
+            _radGlass = Mat.Track(m);
+            return _radGlass;
         }
 
         /// <summary>The Mosaic body without its tiles: SR2 default body colouring (top / middle / bottom), no tile normals.
@@ -228,6 +241,24 @@ namespace ClassicSlimes
             Visuals.Mats["MosaicSmooth"] = m;
             _smooth = Mat.Track(m);
             return _smooth;
+        }
+
+        /// <summary>Smooth opal-violet under-body for Radiant Mosaic under its facets (preserves full SR2 radiant effect).</summary>
+        internal static Material RadiantSmooth()
+        {
+            if (_radSmooth != null) return _radSmooth;
+            var tiles = _radTiles ?? Tiles;
+            if (tiles == null) return null;
+            var m = Object.Instantiate(tiles);
+            m.name = "ClassicSlimes_MosaicRadiantSmooth";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Kw("_BODYCOLORING_MULTI", false); m.Kw("_BODYCOLORING_DEFAULT", true); m.Flt("_BodyColoring", 0f);
+            m.Palette(new Color(0.96f, 0.88f, 1.00f), new Color(0.78f, 0.28f, 0.92f), new Color(0.18f, 0.68f, 0.96f));
+            m.Kw("_ENABLENORMALS_ON", false); m.Flt("_EnableNormals", 0f);
+            RadiantLooks.EnableRadiantOnBody(m, new Color(0.96f, 0.88f, 1.00f), new Color(0.78f, 0.28f, 0.92f), new Color(0.18f, 0.68f, 0.96f), 0.70f);
+            Visuals.Mats["MosaicRadiantSmooth"] = m;
+            _radSmooth = Mat.Track(m);
+            return _radSmooth;
         }
 
         static void ApplyShimmer(Material m)
@@ -255,7 +286,7 @@ namespace ClassicSlimes
             float t = Time.time * Visuals.MosaicIrisSpeed * IrisDrift;
             var ofs = new Vector2(t - Mathf.Floor(t), t * 0.37f - Mathf.Floor(t * 0.37f));
             if (_glass != null) _glass.SetTextureOffset(ReflectionId, ofs);
-            if (_largoGlass != null) _largoGlass.SetTextureOffset(ReflectionId, ofs);
+            if (_radGlass != null) _radGlass.SetTextureOffset(ReflectionId, ofs);
         }
 
         /// <summary>The Mosaic gordo prefab and its live copies.</summary>

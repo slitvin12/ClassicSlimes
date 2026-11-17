@@ -26,7 +26,7 @@ namespace ClassicSlimes
             return null;
         }
 
-        static Material Keep(Material m, string key)
+        internal static Material Keep(Material m, string key)
         {
             if (m == null) return null;
             m.hideFlags = HideFlags.DontUnloadUnusedAsset;
@@ -37,7 +37,7 @@ namespace ClassicSlimes
         // ------------------------------------------------------------------ faces
 
         /// <summary>Copy of a face material on the glowing variant of its shader (eyeInvoke / mouthInvoke templates).</summary>
-        static Material GlowFaceMat(Material src, bool eyes, string suffix)
+        internal static Material GlowFaceMat(Material src, bool eyes, string suffix)
         {
             var m = Object.Instantiate(src);
             m.name = src.name + suffix;
@@ -173,7 +173,7 @@ namespace ClassicSlimes
         }
 
         /// <summary>A mouth that draws nothing (SR2's own "Null Render" face shader; fallback: an empty face atlas).</summary>
-        static Material NoMouth(Material mo)
+        internal static Material NoMouth(Material mo)
         {
             var m = Object.Instantiate(mo);
             m.name = mo.name + "_None";
@@ -188,7 +188,7 @@ namespace ClassicSlimes
         static SlimeFace _glitchFaceSR1, _glitchFaceSR2;
         public static SlimeFace GlitchFace(bool sr1) => sr1 ? _glitchFaceSR1 : _glitchFaceSR2;
 
-        static string GlitchAtlas(Expr ex)
+        internal static string GlitchAtlas(Expr ex)
         {
             string n = ex.ToString().ToUpperInvariant();
             if (n.Contains("BLINK") || n.Contains("SLEEP") || n.Contains("TIRED")) return "face_glitch_blink";
@@ -366,7 +366,7 @@ namespace ClassicSlimes
             return _domes[i];
         }
 
-        static Material _largoDome0;
+        static Material _largoDome0, _gordoDome, _gordoDomeRad, _gordoRadCore, _radDome0, _radLargoDome0, _radMoteRadiant;
         public static Material LargoDome0()
         {
             if (_largoDome0 != null) return _largoDome0;
@@ -383,11 +383,122 @@ namespace ClassicSlimes
             return _largoDome0;
         }
 
+        /// <summary>Cherenkov blue-violet radiation dome for Radiant Rad slimes.</summary>
+        public static Material RadiantDome0()
+        {
+            if (_radDome0 != null) return _radDome0;
+            var src = Dome(0);
+            if (src == null) return null;
+            var m = Object.Instantiate(src);
+            m.name = "ClassicSlimes_RadDome0Radiant";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Col("_Color", new Color(0.10f, 0.62f, 1.00f, 0f));
+            m.Flt("_Opacity", 0.088f);
+            m.Flt("_ReflectionIntensity", 38f);
+            m.Flt("_ReflectionFresnelPower", 3.2f);
+            m.Col("_ReflectionTint", new Color(0.32f, 0.92f, 1.00f, 0f));
+            m.Flt("_DistortionStrength", 3.2f);
+            _radDome0 = Keep(m, "RadDome0Radiant");
+            return _radDome0;
+        }
+
+        public static Material LargoRadiantDome0()
+        {
+            if (_radLargoDome0 != null) return _radLargoDome0;
+            var src = RadiantDome0();
+            if (src == null) return null;
+            var m = Object.Instantiate(src);
+            m.name = "ClassicSlimes_RadDome0LargoRadiant";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Flt("_Opacity", 0.045f);
+            m.Flt("_Smoothness", 0.42f);
+            m.Flt("_ReflectionIntensity", 16f);
+            m.Flt("_DistortionStrength", 2.0f);
+            _radLargoDome0 = Keep(m, "RadDome0LargoRadiant");
+            return _radLargoDome0;
+        }
+
+        /// <summary>
+        /// Double-sided radiation dome for Rad Gordo so standing near the gordo (or on a 10m Ranch Snare plot)
+        /// never backface-culls the aura into invisibility.
+        /// </summary>
+        public static Material GordoDome(bool radiant = false)
+        {
+            if (radiant && _gordoDomeRad != null) return _gordoDomeRad;
+            if (!radiant && _gordoDome != null) return _gordoDome;
+            var src = radiant ? (RadiantDome0() ?? Dome(0)) : Dome(0);
+            if (src == null) return null;
+            var m = Object.Instantiate(src);
+            m.name = radiant ? "ClassicSlimes_RadGordoDomeRadiant" : "ClassicSlimes_RadGordoDome";
+            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            m.Flt("_Opacity", 0.095f);
+            m.Flt("_Smoothness", 0.65f);
+            m.Flt("_ReflectionIntensity", 40f);
+            m.Flt("_ReflectionFresnelPower", 2.6f);
+            m.Flt("_DistortionStrength", 3.0f);
+            m.Kw("_DOUBLESIDED_ON", true);
+            m.Flt("_DoubleSidedEnable", 1f);
+            m.Flt("_CullMode", 0f); m.Flt("_CullModeForward", 0f); m.Flt("_TransparentCullMode", 0f);
+            if (radiant) { _gordoDomeRad = Keep(m, "RadGordoDomeRadiant"); return _gordoDomeRad; }
+            _gordoDome = Keep(m, "RadGordoDome");
+            return _gordoDome;
+        }
+
+        static Material GordoRadCoreMat
+        {
+            get
+            {
+                if (_gordoRadCore != null) return _gordoRadCore;
+                var src = RadCoreMat;
+                if (src == null) return null;
+                var m = Object.Instantiate(src);
+                m.name = "ClassicSlimes_RadGordoCore";
+                m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                m.Col("_Color", new Color(0.14f, 0.95f, 0.24f, 0.34f));
+                m.Flt("_GlowMin", 0.65f); m.Flt("_GlowMax", 0.28f); m.Flt("_GlowSpeed", 0.7f);
+                _gordoRadCore = Keep(m, "RadGordoCore");
+                return _gordoRadCore;
+            }
+        }
+
+        public static GameObject MakeGordoDome(Transform parent, Vector3 localPos, float diameter, bool radiant = false)
+        {
+            var mat = GordoDome(radiant);
+            var root = Sphere("RadAura", parent, localPos, diameter, mat);
+            if (root != null && GordoRadCoreMat != null)
+                Sphere("RadGordoCore", root.transform, Vector3.zero, 0.62f, GordoRadCoreMat);
+            return root;
+        }
+
+        public static void ScrollExtraDomeNormals(Vector2 ofs)
+        {
+            foreach (var m in new[] { _radDome0, _radLargoDome0, _gordoDome, _gordoDomeRad })
+                if (m != null && m.HasProperty("_NormalMap")) m.SetTextureOffset("_NormalMap", ofs);
+        }
+
+        public static Material RadMoteRadiantMat
+        {
+            get
+            {
+                if (_radMoteRadiant != null) return _radMoteRadiant;
+                var src = RadMoteMat;
+                if (src == null) return null;
+                var m = Object.Instantiate(src);
+                m.name = "ClassicSlimes_RadMoteRadiant";
+                m.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                m.Col("_TintColor", new Color(0.42f, 0.85f, 1.00f, 0.85f));
+                _radMoteRadiant = Keep(m, "RadMoteRadiant");
+                return _radMoteRadiant;
+            }
+        }
+
         /// <summary>The radiation dome object: its local scale is the dome diameter (set by RadSlime).</summary>
-        public static GameObject MakeDome(Transform parent, Vector3 localPos, float diameter, int style = -1, bool largo = false)
+        public static GameObject MakeDome(Transform parent, Vector3 localPos, float diameter, int style = -1, bool largo = false, bool radiant = false)
         {
             int i = Mathf.Clamp(style < 0 ? DomeStyle : style, 0, _domes.Length - 1);
-            var mat = (largo && i == 0) ? (LargoDome0() ?? Dome(0)) : Dome(i);
+            var mat = i == 0
+                ? (radiant ? (largo ? LargoRadiantDome0() : RadiantDome0()) : (largo ? LargoDome0() : Dome(0)))
+                : Dome(i);
             if (mat == null && i != 1) { i = 1; mat = Dome(1); }
             if (!DomeIsBillboard(i)) return Sphere("RadAura", parent, localPos, diameter, mat);
             var root = new GameObject("RadAura");
@@ -590,24 +701,10 @@ namespace ClassicSlimes
         /// Surface mode: 3 (default) = SimpleGlass coat on the native body's exact skinned + warped vertices.
         /// 2 = tile surface only, 0 = legacy SR1 shell / root JellyRig, 1 = experimental aura coat.
         /// SimpleGlass lacks the native vertex warp; ElasticGlassRig supplies it without changing the body's physics.
+        /// Restored to pre-1.3.5 unified ShellMat brilliance for both base Mosaic and Mosaic largos.
         /// </summary>
         public static int MosaicGlassMode = 3;
-        static Material _largoShell;
-        internal static Material MosaicElasticGlassMaterial(bool largo = false)
-        {
-            var baseMat = ShellMat();
-            if (!largo || baseMat == null) return baseMat;
-            if (_largoShell != null) return _largoShell;
-            var m = Object.Instantiate(baseMat);
-            m.name = "ClassicSlimes_MosaicLargoGlass";
-            m.hideFlags = HideFlags.DontUnloadUnusedAsset;
-            m.Flt("_Opacity", 0.02f);
-            m.Flt("_Smoothness", 0.68f);
-            m.Flt("_ReflectionIntensity", 145f);
-            m.Flt("_DistortionStrength", 0.9f);
-            _largoShell = Keep(m, "MosaicLargoShell");
-            return _largoShell;
-        }
+        internal static Material MosaicElasticGlassMaterial(bool largo = false) => ShellMat();
         public static string MosaicCoatTemplate = "RadiantAura_strong";
 
         static Material _coat;
@@ -700,7 +797,7 @@ namespace ClassicSlimes
                 if (_flare != null) return _flare;
                 var m = Mat.Clone("MosaicFlare", "fxDiamondGlint");
                 if (m == null) return null;
-                m.Col("_Color", new Color(7.5f, 8.5f, 10.5f, 1f));
+                m.Col("_Color", new Color(18f, 20f, 24f, 1f));
                 _flare = Keep(m, "MosaicFlare");
                 return _flare;
             }

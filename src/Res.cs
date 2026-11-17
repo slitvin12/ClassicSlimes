@@ -175,6 +175,23 @@ namespace ClassicSlimes
                 if (frames <= 0) throw new Exception("empty wav");
                 var data = new float[samples];
                 for (int i = 0; i < samples; i++) data[i] = BitConverter.ToInt16(bytes, dataOff + i * 2) / 32768f;
+                if (name == "radslime_aura_03" || name == "player_radiation_sickness")
+                {
+                    double sumSq = 0;
+                    float peak = 0f;
+                    for (int i = 0; i < data.Length; i++)
+                    {
+                        float a = Mathf.Abs(data[i]);
+                        if (a > peak) peak = a;
+                        sumSq += (double)a * a;
+                    }
+                    float rms = data.Length > 0 ? Mathf.Sqrt((float)(sumSq / data.Length)) : 0f;
+                    if (peak > 1e-4f && peak < 0.85f && rms > 1e-5f && rms < 0.16f)
+                    {
+                        float gain = Mathf.Clamp(Mathf.Min(0.92f / peak, 0.18f / rms), 1f, 3.2f);
+                        for (int i = 0; i < data.Length; i++) data[i] *= gain;
+                    }
+                }
                 c = AudioClip.Create(name, frames, channels, rate, false);
                 c.SetData(new Il2CppStructArray<float>(data), 0);
                 c.hideFlags = HideFlags.HideAndDontSave;

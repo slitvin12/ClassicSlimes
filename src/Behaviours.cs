@@ -83,13 +83,14 @@ namespace ClassicSlimes
     {
         public RadSlime(IntPtr ptr) : base(ptr) { }
 
-        // SR1 RadAura: transform scale 3.2 on a sphere of RADIUS 1; our sphere mesh has diameter 1 -> 6.4
-        const float AuraScale = 6.4f;
+        // SR1 RadAura: transform scale 3.2 on a sphere of RADIUS 1; our sphere mesh has diameter 1 -> 6.4 (3.0 on 4-6x gordo)
+        const float AuraScale = 6.4f, GordoAuraScale = 3.0f;
         const float CoreRatio = 0.62f;
         public static readonly List<RadSlime> All = new();
         public bool NoExpand;
 
         IntPtr _absorberPlayerPtr;
+        float BaseAuraScale => _isGordo ? GordoAuraScale : AuraScale;
 
         internal static void ClearSession()
         {
@@ -131,7 +132,7 @@ namespace ClassicSlimes
                         if (r == null || !r.isActiveAndEnabled || r._factor <= 0.02f || (r._vac != null && r._vac.IsHeld())) continue;
                         var ge = r.GetComponent<GordoEat>();
                         if (ge != null && ge.GetEatenCount() == GordoEat.ALREADY_BURST_FLAG) continue;
-                        float maxRange = 13f * Mathf.Max(1f, r.transform.lossyScale.x * 0.5f);
+                        float maxRange = r._isGordo ? 36f : (r._isLargo ? 28f : 24f);
                         float d2 = (r.transform.position - pp).sqrMagnitude;
                         if (d2 < maxRange * maxRange && d2 < best) { best = d2; _radSpeaker = r; }
                     }
@@ -146,18 +147,14 @@ namespace ClassicSlimes
             foreach (var r in All)
             {
                 if (r == null) continue;
-                if (r._aura != null) Destroy(r._aura);
-                if (r._core != null) Destroy(r._core);
-                r._aura = Visuals.MakeDome(r.transform, new Vector3(0f, 0.5f, 0f), AuraScale, -1, r._isLargo);
-                r._core = r.MakeCore();
-                r.MakeHaze();
+                r.BuildAuraVisuals();
             }
         }
 
         /// <summary>SR1 heat haze: a boiling refraction volume just inside the glass dome (only with the refracting dome).</summary>
         void MakeHaze()
         {
-            if (_aura == null || Visuals.DomeIsBillboard(Visuals.DomeStyle) || !Cfg.RadHaze.Value) return;
+            if (_aura == null || _isGordo || Visuals.DomeIsBillboard(Visuals.DomeStyle) || !Cfg.RadHaze.Value) return;
             var m = Visuals.RadHazeMat;
             if (m != null) Visuals.Sphere("RadHaze", _aura.transform, Vector3.zero, 0.97f, m);
         }
@@ -187,25 +184,88 @@ namespace ClassicSlimes
         ParticleSystem _motes;
         SECTR_PointSource _loop;
         SlimeEmotions _emo;
+        SlimeAppearanceApplicator _app;
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
         PlayerRadAbsorber _absorber;
-        bool _isLargo;
+        bool _isLargo, _isGordo, _radiantDome;
         float _factor = 1f, _nextExpand, _expandedUntil, _fallbackTick, _phase;
+
+        bool WantsRadiantDome()
+        {
+            if (_isGordo || _app == null || _app.Appearance == null) return false;
+            var app = _app.Appearance;
+            if (!_isLargo) return RadiantLooks.IsRadiantAppearance(app);
+            var n = app.name ?? "";
+            return n.Contains("RadRadiant", StringComparison.Ordinal);
+        }
+
+        void BuildAuraVisuals()
+        {
+            if (_aura != null) Destroy(_aura);
+            if (_core != null) Destroy(_core);
+            float scale = BaseAuraScale;
+            if (_isGordo)
+            {
+                _aura = Visuals.MakeGordoDome(transform, new Vector3(0f, 0.5f, 0f), scale, _radiantDome);
+                _core = null;
+            }
+            else
+            {
+                _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), scale, -1, _isLargo, _radiantDome);
+                _core = MakeCore();
+                MakeHaze();
+            }
+            Color c0 = _radiantDome ? new Color(0.45f, 0.96f, 1.00f, 1f) : new Color(0.75f, 1f, 0.40f, 1f);
+            Color c1 = _radiantDome ? new Color(0.32f, 0.42f, 1.00f, 1f) : new Color(0.25f, 1f, 0.30f, 1f);
+            var moteMat = _radiantDome ? Visuals.RadMoteRadiantMat : Visuals.RadMoteMat;
+            if (_motes == null)
+            {
+                float rate = _isGordo ? 22f : (_isLargo ? 5f : 14f);
+                float size0 = _isGordo ? 0.10f : 0.07f;
+                float size1 = _isGordo ? 0.22f : 0.16f;
+                float radius = _isGordo ? scale * 0.42f : 2.3f;
+                int max = _isGordo ? 56 : (_isLargo ? 18 : 40);
+                _motes = Gfx.Sparkles("RadMotes", transform, new Vector3(0f, 0.45f, 0f), moteMat, c0, c1, rate, 2.2f, size0, size1, radius, max, _isGordo ? 0.22f : 0.16f);
+                if (_motes != null)
+                {
+                    try
+                    {
+                        var mm = _motes.main;
+                        mm.gravityModifierMultiplier = -0.05f;
+                        if (_isGordo) mm.scalingMode = ParticleSystemScalingMode.Hierarchy;
+                    }
+                    catch { }
+                }
+            }
+            else
+            {
+                try
+                {
+                    var mm = _motes.main;
+                    mm.startColor = new ParticleSystem.MinMaxGradient(c0, c1);
+                    var r = _motes.GetComponent<ParticleSystemRenderer>();
+                    if (r != null && moteMat != null) r.sharedMaterial = moteMat;
+                }
+                catch { }
+            }
+        }
 
         void Start()
         {
             _emo = GetComponent<SlimeEmotions>();
+            _app = GetComponent<SlimeAppearanceApplicator>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
-            try { var eat = GetComponent<SlimeEat>(); _isLargo = (eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo) || transform.lossyScale.x > 1.35f; } catch { }
-            _aura = Visuals.MakeDome(transform, new Vector3(0f, 0.5f, 0f), AuraScale, -1, _isLargo);
-            _core = MakeCore();
-            MakeHaze();
-            // glowing green motes drifting up inside the aura (toned down on largos)
-            _motes = Gfx.Sparkles("RadMotes", transform, new Vector3(0f, 0.45f, 0f), Visuals.RadMoteMat,
-                new Color(0.75f, 1f, 0.40f, 1f), new Color(0.25f, 1f, 0.30f, 1f), _isLargo ? 5f : 14f, 2.2f, 0.07f, 0.16f, 2.3f, _isLargo ? 18 : 40, 0.16f);
-            if (_motes != null) { try { var mm = _motes.main; mm.gravityModifierMultiplier = -0.05f; } catch { } }
+            _isGordo = GetComponent<GordoEat>() != null || GetComponent<GordoIdentifiable>() != null;
+            try
+            {
+                var eat = GetComponent<SlimeEat>();
+                _isLargo = !_isGordo && ((eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo) || transform.lossyScale.x > 1.35f);
+            }
+            catch { }
+            _radiantDome = WantsRadiantDome();
+            BuildAuraVisuals();
             _phase = U.Rand(0f, 10f);
             All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.RadAura);
@@ -225,6 +285,7 @@ namespace ClassicSlimes
             if (m != null && m.HasProperty("_NormalMap")) m.SetTextureOffset("_NormalMap", ofs);
             var lm = Visuals.LargoDome0();
             if (lm != null && lm != m && lm.HasProperty("_NormalMap")) lm.SetTextureOffset("_NormalMap", ofs);
+            Visuals.ScrollExtraDomeNormals(ofs);
         }
 
         /// <summary>Dev / tests: start the SR1 expansion (x1.5 for 3 + 10 s) now.</summary>
@@ -244,6 +305,11 @@ namespace ClassicSlimes
         {
             float dt = Time.deltaTime;
             if (!_gordoChecked) { _gordoChecked = true; _gordo = GetComponent<GordoEat>(); }
+            if (!_isGordo)
+            {
+                bool wantRad = WantsRadiantDome();
+                if (wantRad != _radiantDome) { _radiantDome = wantRad; BuildAuraVisuals(); }
+            }
             bool burstedGordo = _gordo != null && _gordo.GetEatenCount() == GordoEat.ALREADY_BURST_FLAG;
             bool calmed = burstedGordo || (_calm != null && _calm.IsCalmed());
             bool held = _vac != null && _vac.IsHeld();
@@ -259,6 +325,7 @@ namespace ClassicSlimes
             _factor = burstedGordo ? 0f : Mathf.MoveTowards(_factor, target, rate * dt);
 
             bool show = !burstedGordo && !held && _factor > 0.02f;
+            float baseScale = BaseAuraScale;
             // slow "breathing" of the aura (per slime phase), on top of the SR1 expansion
             float pulse = 1f + 0.035f * Mathf.Sin((Time.time + _phase) * 2.4f);
             ScrollRipples();
@@ -267,16 +334,16 @@ namespace ClassicSlimes
                 if (_aura.activeSelf != show) _aura.SetActive(show);
                 if (show)
                 {
-                    if (Visuals.DomeIsBillboard(Visuals.DomeStyle))
+                    if (!_isGordo && Visuals.DomeIsBillboard(Visuals.DomeStyle))
                     {
-                        _aura.transform.localScale = Vector3.one * (AuraScale * _factor * pulse);
+                        _aura.transform.localScale = Vector3.one * (baseScale * _factor * pulse);
                     }
                     else
                     {
                         // jelly wobble: the three axes swell and shrink out of step, so the dome never sits still
                         float w = Time.time + _phase * 3f;
                         var jelly = new Vector3(1f + 0.05f * Mathf.Sin(w * 2.1f), 1f + 0.055f * Mathf.Sin(w * 2.7f + 1.1f), 1f + 0.05f * Mathf.Sin(w * 1.75f + 2.3f));
-                        _aura.transform.localScale = jelly * (AuraScale * _factor * pulse);
+                        _aura.transform.localScale = jelly * (baseScale * _factor * pulse);
                         // slow spin + sway: the refraction ripples of the glass dome crawl like SR1's heat haze
                         float t = Time.time + _phase * 7f;
                         _aura.transform.localRotation = Quaternion.Euler(14f * Mathf.Sin(t * 0.37f), t * Visuals.DomeSpin, 10f * Mathf.Sin(t * 0.29f + 1.3f));
@@ -286,15 +353,14 @@ namespace ClassicSlimes
             if (_core != null)
             {
                 if (_core.activeSelf != show) _core.SetActive(show);
-                if (show) _core.transform.localScale = Vector3.one * (AuraScale * CoreRatio * Mathf.Max(_factor, 0.4f) * pulse);
+                if (show) _core.transform.localScale = Vector3.one * (baseScale * CoreRatio * Mathf.Max(_factor, 0.4f) * pulse);
             }
             Gfx.SetEmitting(_motes, show);
             Snd.SetPlaying(_loop, show && IsAudioLeader(this));
 
             if (dt <= 0f || !show || !Cfg.RadAuraDamagesPlayer.Value) return;
-            // AuraScale is the DIAMETER of the (unit-diameter) aura sphere: irradiate only inside what is drawn
-            // (it used to be the radius -> the player got rads up to 3.6 m away from a 1.6 m aura)
-            float radius = 0.5f * AuraScale * _factor * transform.lossyScale.x;
+            // BaseAuraScale is the DIAMETER of the (unit-diameter) aura sphere: irradiate only inside what is drawn
+            float radius = 0.5f * baseScale * _factor * transform.lossyScale.x;
             var center = transform.position + Vector3.up * (0.5f * transform.lossyScale.y);
             if (U.DistToPlayer(center) > radius + 0.35f) return;
             var p = U.Player;
@@ -980,11 +1046,12 @@ namespace ClassicSlimes
 
         readonly List<MosaicGlint> _glints = new();
         SlimeEmotions _emo;
+        SlimeAppearanceApplicator _app;
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
         Rigidbody _rb;
         SECTR_PointSource _loop;
-        bool _isLargo;
+        bool _isLargo, _lastRadiant;
         double _nextGlint;
         float _nextPull, _nextFlare;
         ParticleSystem _stars;
@@ -992,17 +1059,24 @@ namespace ClassicSlimes
         readonly float[] _flareT = { -1f, -1f };
         readonly float[] _flareSize = new float[2];
 
+        bool IsRadiant => _app != null && RadiantLooks.IsRadiantAppearance(_app.Appearance);
+
         void Start()
         {
             _emo = GetComponent<SlimeEmotions>();
+            _app = GetComponent<SlimeAppearanceApplicator>();
             _vac = GetComponent<Vacuumable>();
             _calm = GetComponent<CalmedByWaterSpray>();
             _rb = GetComponent<Rigidbody>();
             try { var eat = GetComponent<SlimeEat>(); _isLargo = (eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo) || transform.lossyScale.x > 1.35f; } catch { }
             All.Add(this);
             _loop = Snd.Loop(gameObject, Snd.MosaicAura);
-            // SR1 look: white four-point stars twinkling on the glass + occasional glint flares (gentler on largos)
-            _stars = Gfx.Sparkles("MosaicStars", transform, new Vector3(0f, 0.55f, 0f), Visuals.StarMat, Color.white, new Color(0.7f, 0.9f, 1f, 1f), _isLargo ? 0.9f : 2.2f, 0.75f, 0.20f, _isLargo ? 0.34f : 0.46f, 0.5f, _isLargo ? 4 : 8);
+            _lastRadiant = IsRadiant;
+            // SR1 look: white four-point stars twinkling on the glass + occasional glint flares (opal/cyan-pink on Radiant)
+            _stars = Gfx.Sparkles("MosaicStars", transform, new Vector3(0f, 0.55f, 0f), Visuals.StarMat,
+                _lastRadiant ? new Color(1f, 0.78f, 0.98f, 1f) : Color.white,
+                _lastRadiant ? new Color(0.55f, 0.92f, 1f, 1f) : new Color(0.7f, 0.9f, 1f, 1f),
+                _isLargo ? 0.9f : 2.2f, 0.75f, 0.20f, _isLargo ? 0.34f : 0.46f, 0.5f, _isLargo ? 4 : 8);
             for (int i = 0; i < _flares.Length; i++)
             {
                 _flares[i] = Gfx.Billboard("MosaicFlare", transform, Visuals.FlareMat, Vector3.zero, 0f);
@@ -1043,6 +1117,22 @@ namespace ClassicSlimes
         void Update()
         {
             _glints.RemoveAll(g => g == null);
+            bool rad = IsRadiant;
+            if (rad != _lastRadiant)
+            {
+                _lastRadiant = rad;
+                if (_stars != null)
+                {
+                    try
+                    {
+                        var mm = _stars.main;
+                        mm.startColor = new ParticleSystem.MinMaxGradient(
+                            rad ? new Color(1f, 0.78f, 0.98f, 1f) : Color.white,
+                            rad ? new Color(0.55f, 0.92f, 1f, 1f) : new Color(0.7f, 0.9f, 1f, 1f));
+                    }
+                    catch { }
+                }
+            }
             bool day = U.IsDay();
             bool held = _vac != null && _vac.IsHeld();
             Gfx.SetEmitting(_stars, !held);
@@ -1264,11 +1354,14 @@ namespace ClassicSlimes
     {
         public QuicksilverSlime(IntPtr ptr) : base(ptr) { }
 
-        class Swap { public Renderer R; public int I; public Material Orig; }
+        class Swap { public Renderer R; public int I; public Material Orig, Applied; }
 
         static readonly Color StreakHead = new(0.86f, 0.9f, 1f, 0.55f), StreakTail = new(0.55f, 0.62f, 0.75f, 0f);
         static readonly Color ChargedHead = new(0.45f, 0.86f, 1f, 0.8f), ChargedTail = new(0.15f, 0.45f, 1f, 0f);
+        static readonly Color RadStreakHead = new(1.00f, 0.78f, 0.90f, 0.65f), RadStreakTail = new(0.62f, 0.30f, 0.78f, 0f);
+        static readonly Color RadChargedHead = new(1.00f, 0.85f, 0.35f, 0.88f), RadChargedTail = new(0.92f, 0.25f, 0.82f, 0f);
 
+        SlimeAppearanceApplicator _app;
         Rigidbody _rb;
         Vacuumable _vac;
         SECTR_PointSource _loop;
@@ -1276,8 +1369,10 @@ namespace ClassicSlimes
         TrailRenderer _streak;
         readonly List<Swap> _swaps = new();
         float _chargedUntil, _nextDash, _nextZap, _nextSpark, _nextCrackle, _nextStatic, _nextShine, _zigAt = -1f;
-        bool _wasCharged, _chargedLook, _streakOn;
+        bool _wasCharged, _chargedLook, _streakOn, _lastRadiant;
         Vector3 _zigDir;
+
+        bool IsRadiant => _app != null && RadiantLooks.IsRadiantAppearance(_app.Appearance);
 
         // ground runner (SR1 quicksilver never hops: it races around like a car on a track)
         /// <summary>SR2 hopping subbehaviours (random move, food leaps) of the quicksilver slimes -> their runner.</summary>
@@ -1338,6 +1433,7 @@ namespace ClassicSlimes
 
         void Start()
         {
+            _app = GetComponent<SlimeAppearanceApplicator>();
             _rb = GetComponent<Rigidbody>();
             _vac = GetComponent<Vacuumable>();
             _loop = Snd.Loop(gameObject, Snd.QsAura);
@@ -1345,13 +1441,17 @@ namespace ClassicSlimes
             _nextDash = now + U.Rand(1f, 4f);
             _nextStatic = now + U.Rand(2f, 6f);
             _nextShine = now + U.Rand(0.5f, 2.5f);
-            // static crackle: small electric-blue stars around the body (emitted by hand)
+            _lastRadiant = IsRadiant;
+            // static crackle: small stars around the body (electric-blue or rose-gold on Radiant)
             _crackle = Gfx.Sparkles("QsCrackle", transform, new Vector3(0f, 0.5f, 0f), Visuals.StarMat,
-                new Color(0.8f, 0.96f, 1f, 1f), new Color(0.3f, 0.68f, 1f, 1f), 0f, 0.2f, 0.1f, 0.26f, 0.55f, 24, 0.5f);
+                _lastRadiant ? new Color(1.00f, 0.90f, 0.65f, 1f) : new Color(0.8f, 0.96f, 1f, 1f),
+                _lastRadiant ? new Color(1.00f, 0.42f, 0.85f, 1f) : new Color(0.3f, 0.68f, 1f, 1f),
+                0f, 0.2f, 0.1f, 0.26f, 0.55f, 24, 0.5f);
             // chrome shine: a white star glint on the upper body now and then
             _shine = Gfx.Sparkles("QsShine", transform, new Vector3(0f, 0.78f, 0.12f), Visuals.StarMat,
                 Color.white, new Color(0.86f, 0.93f, 1f, 1f), 0f, 0.42f, 0.22f, 0.36f, 0.26f, 3);
-            _streak = Gfx.Ribbon("QsStreak", transform, new Vector3(0f, 0.42f, 0f), Visuals.QsStreakMat, 0.22f, 0.62f, 0.04f, StreakHead, StreakTail);
+            _streak = Gfx.Ribbon("QsStreak", transform, new Vector3(0f, 0.42f, 0f), Visuals.QsStreakMat, 0.22f, 0.62f, 0.04f,
+                _lastRadiant ? RadStreakHead : StreakHead, _lastRadiant ? RadStreakTail : StreakTail);
             if (_streak != null) { _streak.textureMode = LineTextureMode.Stretch; _streak.emitting = false; }
             _yaw = YawOf(transform.forward);
             _nextPause = now + U.Rand(5f, 10f);
@@ -1669,6 +1769,22 @@ namespace ClassicSlimes
         void Update()
         {
             float now = Time.time;
+            bool rad = IsRadiant;
+            if (rad != _lastRadiant)
+            {
+                _lastRadiant = rad;
+                if (_crackle != null)
+                {
+                    try
+                    {
+                        var mm = _crackle.main;
+                        mm.startColor = new ParticleSystem.MinMaxGradient(
+                            rad ? new Color(1.00f, 0.90f, 0.65f, 1f) : new Color(0.8f, 0.96f, 1f, 1f),
+                            rad ? new Color(1.00f, 0.42f, 0.85f, 1f) : new Color(0.3f, 0.68f, 1f, 1f));
+                    }
+                    catch { }
+                }
+            }
             bool seated = IsSeated;
             bool held = (_vac != null && _vac.IsHeld()) || seated;
             bool charged = Charged;
@@ -1727,14 +1843,13 @@ namespace ClassicSlimes
             }
         }
 
-        /// <summary>Overcharged look: swap the quicksilver body/crest materials for the electric-blue charged copy.</summary>
+        /// <summary>Overcharged look: swap the quicksilver body/crest materials for the electric-blue (or Radiant plasma) charged copy.</summary>
         void SetChargedLook(bool on)
         {
             _chargedLook = on;
-            var cm = Visuals.QsChargedMat;
+            bool rad = IsRadiant;
             if (on)
             {
-                if (cm == null) return;
                 _swaps.Clear();
                 foreach (var r in GetComponentsInChildren<Renderer>())
                 {
@@ -1745,9 +1860,14 @@ namespace ClassicSlimes
                     for (int i = 0; i < mats.Length; i++)
                     {
                         var m = mats[i];
-                        if (m == null || m == cm || !m.name.Contains("Quicksilver")) continue;
-                        _swaps.Add(new Swap { R = r, I = i, Orig = m });
-                        mats[i] = cm;
+                        if (m == null) continue;
+                        bool isRadMat = m.name.Contains("QsRadiant", StringComparison.Ordinal);
+                        bool isBaseMat = m.name.Contains("Quicksilver", StringComparison.Ordinal);
+                        if (!isRadMat && !isBaseMat) continue;
+                        var target = (isRadMat || rad) ? (RadiantLooks.QsRadiantChargedMat ?? Visuals.QsChargedMat) : Visuals.QsChargedMat;
+                        if (target == null || m == target) continue;
+                        _swaps.Add(new Swap { R = r, I = i, Orig = m, Applied = target });
+                        mats[i] = target;
                         any = true;
                     }
                     if (any) r.sharedMaterials = mats;
@@ -1758,7 +1878,7 @@ namespace ClassicSlimes
             {
                 if (sw.R == null) continue;
                 var mats = sw.R.sharedMaterials;
-                if (mats == null || sw.I >= mats.Length || mats[sw.I] != cm) continue;   // re-applied by the game meanwhile
+                if (mats == null || sw.I >= mats.Length || mats[sw.I] != sw.Applied) continue;   // re-applied by the game meanwhile
                 mats[sw.I] = sw.Orig;
                 sw.R.sharedMaterials = mats;
             }
@@ -1773,7 +1893,7 @@ namespace ClassicSlimes
             if (_crackle != null) _crackle.Emit(10);
         }
 
-        /// <summary>Silver (charged: electric-blue) streak while it moves fast; hysteresis so it doesn't stutter.</summary>
+        /// <summary>Silver (charged: electric-blue / radiant rose-plasma) streak while it moves fast; hysteresis so it doesn't stutter.</summary>
         void UpdateStreak(bool held, bool charged)
         {
             if (_streak == null) return;
@@ -1781,8 +1901,9 @@ namespace ClassicSlimes
             bool on = !held && (_streakOn ? v > 2.5f : v > 4f);
             if (on != _streakOn) { _streakOn = on; Gfx.SetEmitting(_streak, on); }
             if (!on) return;
-            _streak.startColor = charged ? ChargedHead : StreakHead;
-            _streak.endColor = charged ? ChargedTail : StreakTail;
+            bool rad = IsRadiant;
+            _streak.startColor = rad ? (charged ? RadChargedHead : RadStreakHead) : (charged ? ChargedHead : StreakHead);
+            _streak.endColor = rad ? (charged ? RadChargedTail : RadStreakTail) : (charged ? ChargedTail : StreakTail);
         }
 
         /// <summary>Dev: dash right now (away from the camera's right so it crosses the view).</summary>
@@ -1848,30 +1969,38 @@ namespace ClassicSlimes
         /// <summary>Dev: hold one body mask (0-2 pixel masks, 3+ tear masks; -1 = animate) with or without the colour flash.</summary>
         public static int DevMask = -1;
         public static bool DevFlash;
-        static readonly Dictionary<IntPtr, SlimeAppearance> Disguises = new();
+        static readonly Dictionary<(IntPtr, bool), SlimeAppearance> Disguises = new();
+        static readonly HashSet<IntPtr> DisguisePtrs = new();
         static List<SlimeFace> _faces;
+
+        public static readonly Dictionary<IntPtr, GlitchSlime> FleeNoHop = new();
+        readonly List<IntPtr> _fleeNoHopKeys = new();
 
         SlimeAppearanceApplicator _app;
         SlimeAppearance _own, _disguise;
         Vacuumable _vac;
         CalmedByWaterSpray _calm;
         Rigidbody _rb;
-        bool _disguised, _debugged, _inBurst;
+        bool _disguised, _debugged, _inBurst, _lastRadiant;
         float _nextDisguise, _disguiseUntil, _nextFlicker, _flickerEnd, _heldTime;
         float _nextBlink, _rubberAt = -1f, _calmUntil, _nextJitter, _nextWaterFx, _nextHeldFx;
         int _blinkFrame = -10;
         Vector3 _rubberPos;
-        // caught + thrown -> panic
-        float _fleeUntil, _nextFleeHop, _nextFleeBlink, _fleePendingAt = -1f;
+        // caught + thrown -> smooth fast ground-hugging panic run
+        float _fleeUntil, _nextFleeBlink, _fleePendingAt = -1f, _fleeSteerSide = 1f, _fleeLockUntil, _nextFleeFx;
+        Vector3 _fleeDir;
         bool _wasHeld, _wasLaunched;
-        public static float FleeTime = 10f, FleeHop = 11f, FleeLift = 2.3f;
+        public static float FleeTime = 10f, FleeHop = 11f, FleeLift = 0f, FleeSpeed = 14.5f, FleeAccel = 62f;
         public bool Fleeing => Time.time < _fleeUntil;
+        bool IsRadiant => _own != null && RadiantLooks.IsRadiantAppearance(_own);
 
         ParticleSystem _pixels, _trail, _burst;
         TrailRenderer _ribbon, _ribbon2;
-        static int _maskFrame = -1;
+        static int _maskFrame = -1, _waterMask = -1;
         static float _nextMask, _nextStrip, _burstUntil, _nextBurst;
-        static bool _wasBurst, _flashOn, _flashSaved;
+        static bool _wasBurst, _flashOn, _flashSaved, _flashOnRad, _flashSavedRad;
+
+        static int WaterMask => _waterMask >= 0 ? _waterMask : (_waterMask = 1 << (LayerMask.NameToLayer("Water") >= 0 ? LayerMask.NameToLayer("Water") : 4));
 
         static readonly string[] FlashProps = { "_BlueTopColor", "_BlueMiddleColor", "_BlueBottomColor", "_GreenTopColor", "_GreenMiddleColor", "_GreenBottomColor" };
         static readonly Color[] FlashCols =
@@ -1879,7 +2008,13 @@ namespace ClassicSlimes
             new(0.62f, 1f, 0.9f), new(0.5f, 1f, 0.86f), new(0.38f, 0.94f, 0.78f),       // light cells -> SR1 mint
             new(0.16f, 0.36f, 0.66f), new(0.12f, 0.28f, 0.58f), new(0.08f, 0.2f, 0.48f)  // dark cells -> deep blue
         };
+        static readonly Color[] FlashColsRad =
+        {
+            new(1.00f, 0.98f, 0.55f), new(1.00f, 0.86f, 0.30f), new(1.00f, 0.70f, 0.16f), // light cells -> overdrive gold
+            new(0.28f, 0.98f, 1.00f), new(0.16f, 0.85f, 1.00f), new(0.68f, 0.22f, 1.00f)  // dark cells -> cyber cyan/violet
+        };
         static readonly Color[] _flashOrig = new Color[6];
+        static readonly Color[] _flashOrigRad = new Color[6];
 
         public static bool Bursting => Time.time < _burstUntil;
 
@@ -1891,24 +2026,38 @@ namespace ClassicSlimes
             _nextMask = 0f;
         }
 
+        static void ApplyMaskAndFlash(string matKey, Texture tex, bool wantFlash, ref bool flashOn, ref bool flashSaved, Color[] orig, Color[] cols)
+        {
+            if (!Visuals.Mats.TryGetValue(matKey, out var m) || m == null) return;
+            if (tex != null) m.SetTexture("_ColorMask", tex);
+            if (!flashSaved)
+            {
+                for (int i = 0; i < FlashProps.Length; i++) orig[i] = m.GetColor(FlashProps[i]);
+                flashSaved = true;
+            }
+            if (wantFlash == flashOn) return;
+            flashOn = wantFlash;
+            for (int i = 0; i < FlashProps.Length; i++) m.SetColor(FlashProps[i], wantFlash ? cols[i] : orig[i]);
+        }
+
         /// <summary>
         /// SR1's glitch shader made the pixel cells jump around: swap between a few generated cell masks, and every few
-        /// seconds run a burst of torn masks (shifted rows, stripes, scan lines) with mint/blue colour flashes.
+        /// seconds run a burst of torn masks (shifted rows, stripes, scan lines) with mint/blue (or gold/cyan) colour flashes.
         /// </summary>
         static void AnimateMask()
         {
             if (_maskFrame == Time.frameCount) return;
             _maskFrame = Time.frameCount;
             var masks = Visuals.GlitchMasks;
-            if (masks == null || masks.Length == 0 || !Visuals.Mats.TryGetValue("Glitch", out var m) || m == null) return;
+            if (masks == null || masks.Length == 0) return;
             var tears = Visuals.GlitchTears;
             int nt = tears != null ? tears.Length : 0;
             float now = Time.time;
             if (DevMask >= 0)
             {
                 var t = DevMask < masks.Length ? masks[DevMask] : DevMask - masks.Length < nt ? tears[DevMask - masks.Length] : null;
-                if (t != null) m.SetTexture("_ColorMask", t);
-                Flash(m, DevFlash);
+                ApplyMaskAndFlash("Glitch", t, DevFlash, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+                ApplyMaskAndFlash("GlitchRadiant", t, DevFlash, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
                 return;
             }
             if (now > _nextBurst)
@@ -1921,27 +2070,25 @@ namespace ClassicSlimes
                 _wasBurst = true;
                 if (now < _nextMask) return;
                 _nextMask = now + U.Rand(0.035f, 0.085f);
-                m.SetTexture("_ColorMask", U.Rng.NextDouble() < 0.75 ? tears[U.Rng.Next(nt)] : masks[U.Rng.Next(masks.Length)]);
-                Flash(m, U.Rng.NextDouble() < 0.4);
+                var tex = U.Rng.NextDouble() < 0.75 ? tears[U.Rng.Next(nt)] : masks[U.Rng.Next(masks.Length)];
+                bool flash = U.Rng.NextDouble() < 0.4;
+                ApplyMaskAndFlash("Glitch", tex, flash, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+                ApplyMaskAndFlash("GlitchRadiant", tex, flash, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
                 return;
             }
-            if (_wasBurst) { _wasBurst = false; _nextMask = 0f; Flash(m, false); }
+            if (_wasBurst)
+            {
+                _wasBurst = false;
+                _nextMask = 0f;
+                ApplyMaskAndFlash("Glitch", null, false, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+                ApplyMaskAndFlash("GlitchRadiant", null, false, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
+            }
             if (now < _nextMask) return;
             bool quick = U.Rng.NextDouble() < 0.25;
             _nextMask = now + (quick ? U.Rand(0.05f, 0.12f) : U.Rand(0.4f, 1.6f));
-            m.SetTexture("_ColorMask", masks[U.Rng.Next(masks.Length)]);
-        }
-
-        static void Flash(Material m, bool on)
-        {
-            if (!_flashSaved)
-            {
-                for (int i = 0; i < FlashProps.Length; i++) _flashOrig[i] = m.GetColor(FlashProps[i]);
-                _flashSaved = true;
-            }
-            if (on == _flashOn) return;
-            _flashOn = on;
-            for (int i = 0; i < FlashProps.Length; i++) m.SetColor(FlashProps[i], on ? FlashCols[i] : _flashOrig[i]);
+            var normTex = masks[U.Rng.Next(masks.Length)];
+            ApplyMaskAndFlash("Glitch", normTex, false, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+            ApplyMaskAndFlash("GlitchRadiant", normTex, false, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
         }
 
         /// <summary>SR1's trail shader re-randomised its pixel cells constantly: cycle the generated strips.</summary>
@@ -1959,32 +2106,53 @@ namespace ClassicSlimes
             }
         }
 
+        void SyncTrailPalette(bool rad)
+        {
+            Color p0 = rad ? new Color(1.00f, 0.86f, 0.24f, 1f) : new Color(0.35f, 1f, 0.9f, 1f);
+            Color p1 = rad ? new Color(0.26f, 0.96f, 1.00f, 1f) : new Color(1f, 0.45f, 0.8f, 1f);
+            foreach (var ps in new[] { _pixels, _burst, _trail })
+            {
+                if (ps == null) continue;
+                try { var mm = ps.main; mm.startColor = new ParticleSystem.MinMaxGradient(p0, p1); } catch { }
+            }
+            if (_ribbon != null)
+            {
+                _ribbon.startColor = rad ? new Color(1.00f, 0.78f, 0.14f, 1f) : new Color(1f, 0.16f, 0.70f, 1f);
+                _ribbon.endColor = rad ? new Color(1.00f, 0.32f, 0.72f, 0.1f) : new Color(0.85f, 0.2f, 1f, 0.1f);
+            }
+            if (_ribbon2 != null)
+            {
+                _ribbon2.startColor = rad ? new Color(0.28f, 0.98f, 1.00f, 1f) : new Color(0.25f, 1f, 0.40f, 1f);
+                _ribbon2.endColor = rad ? new Color(0.55f, 0.22f, 1.00f, 0f) : new Color(0.3f, 1f, 0.9f, 0f);
+            }
+        }
+
         void Start()
         {
             All.Add(this);
+            _app = GetComponent<SlimeAppearanceApplicator>();
+            _vac = GetComponent<Vacuumable>();
+            _calm = GetComponent<CalmedByWaterSpray>();
+            _rb = GetComponent<Rigidbody>();
+            _own = _app != null ? _app.Appearance : null;
+            _lastRadiant = IsRadiant;
+
             // the slime's origin is the body centre (body = -0.49..0.49): everything sits on / just behind the body
-            // (the old heights 0.3-0.7 put the streak above the slime)
             _pixels = Gfx.Sparkles("GlitchPixels", transform, new Vector3(0f, PixelY, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.45f, 0.8f, 1f), 3.5f, 1.1f, 0.06f, 0.13f, 0.6f, 12, 0.15f);
-            // world-space pixel bursts (blinks, disguises, debugging) that stay where they were emitted
             _burst = Gfx.Trail("GlitchBurst", transform, new Vector3(0f, PixelY, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.42f, 0.78f, 1f), 0f, 0.75f, 0.07f, 0.17f, 0.5f, 60);
             if (_burst != null) { var main = _burst.main; main.startSpeed = Gfx.Range(0.4f, 1.8f); }
-            // SR1 glitch: a trail of pixel squares left behind while it moves (world space, emitted per metre)
             if (Cfg.GlitchTrail.Value)
             {
                 float sc = Mathf.Max(0.3f, transform.lossyScale.x);
-                // SR1 slimeGlitch_trail (glitch shader: magenta bottom, green top): a wide magenta ribbon of flickering
-                // pixel cells behind the body with a narrower green one above it, plus loose pixels
                 _ribbon = Gfx.Ribbon("GlitchRibbon", transform, new Vector3(0f, RibbonY, 0f), Visuals.RibbonMat(0), RibbonTime, RibbonW * sc, RibbonW * 0.35f * sc,
                     new Color(1f, 0.16f, 0.70f, 1f), new Color(0.85f, 0.2f, 1f, 0.1f));
                 _ribbon2 = Gfx.Ribbon("GlitchRibbonTop", transform, new Vector3(0f, Ribbon2Y, 0f), Visuals.RibbonMat(1), Ribbon2Time, Ribbon2W * sc, Ribbon2W * 0.25f * sc,
                     new Color(0.25f, 1f, 0.40f, 1f), new Color(0.3f, 1f, 0.9f, 0f));
                 _trail = Gfx.Trail("GlitchTrail", transform, new Vector3(0f, TrailY, 0f), Visuals.PixelMat, new Color(0.35f, 1f, 0.9f, 1f), new Color(1f, 0.3f, 0.78f, 1f), 16f, 1.8f, 0.09f, 0.21f, 0.4f, 120);
             }
-            _app = GetComponent<SlimeAppearanceApplicator>();
-            _vac = GetComponent<Vacuumable>();
-            _calm = GetComponent<CalmedByWaterSpray>();
-            _rb = GetComponent<Rigidbody>();
-            _own = _app != null ? _app.Appearance : null;
+            if (_lastRadiant) SyncTrailPalette(true);
+            try { foreach (var c in GetComponentsInChildren<SlimeRandomMove>(true)) { FleeNoHop[c.Pointer] = this; _fleeNoHopKeys.Add(c.Pointer); } } catch { }
+            try { foreach (var c in GetComponentsInChildren<GotoConsumable>(true)) { FleeNoHop[c.Pointer] = this; _fleeNoHopKeys.Add(c.Pointer); } } catch { }
             float now = Time.time;
             _nextDisguise = now + U.Rand(4f, 10f);
             _nextBlink = now + U.Rand(8f, 20f);
@@ -1994,7 +2162,16 @@ namespace ClassicSlimes
         void OnDestroy()
         {
             All.Remove(this);
-            try { if (All.Count == 0 && _flashOn && Visuals.Mats.TryGetValue("Glitch", out var m) && m != null) Flash(m, false); } catch { }
+            foreach (var k in _fleeNoHopKeys) FleeNoHop.Remove(k);
+            try
+            {
+                if (All.Count == 0)
+                {
+                    if (_flashOn) ApplyMaskAndFlash("Glitch", null, false, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+                    if (_flashOnRad) ApplyMaskAndFlash("GlitchRadiant", null, false, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
+                }
+            }
+            catch { }
         }
 
         // trail layout (local, origin = body centre): wide magenta ribbon through the lower body, narrow green one above it
@@ -2026,8 +2203,15 @@ namespace ClassicSlimes
 
         internal static void ClearSession()
         {
-            try { if (_flashOn && Visuals.Mats.TryGetValue("Glitch", out var m) && m != null) Flash(m, false); } catch { }
+            try
+            {
+                if (_flashOn) ApplyMaskAndFlash("Glitch", null, false, ref _flashOn, ref _flashSaved, _flashOrig, FlashCols);
+                if (_flashOnRad) ApplyMaskAndFlash("GlitchRadiant", null, false, ref _flashOnRad, ref _flashSavedRad, _flashOrigRad, FlashColsRad);
+            }
+            catch { }
             _flashOn = false;
+            _flashOnRad = false;
+            FleeNoHop.Clear();
             All.Clear();
         }
 
@@ -2050,9 +2234,16 @@ namespace ClassicSlimes
         void Update()
         {
             try { AnimateMask(); } catch { }
+            if (_app != null && _app.Appearance != null && !DisguisePtrs.Contains(_app.Appearance.Pointer) && _app.Appearance != _own)
+            {
+                _own = _app.Appearance;
+                _disguised = false;
+            }
             if (_own == null && _app != null && !_disguised)
                 _own = _app.Appearance ?? SlimeFactory.Spec("Glitch")?.Def?.AppearancesDefault?[0];
             if (_app == null || _own == null) return;
+            bool rad = IsRadiant;
+            if (rad != _lastRadiant) { _lastRadiant = rad; SyncTrailPalette(rad); }
             float now = Time.time;
             bool held = _vac != null && _vac.IsHeld();
             bool calm = now < _calmUntil || (_calm != null && _calm.IsCalmed());
@@ -2169,14 +2360,16 @@ namespace ClassicSlimes
             Apply(_own);
         }
 
-        /// <summary>Panic: hops away from the rancher every half second, now and then blinks a few metres further away.</summary>
+        /// <summary>Panic: sprints smoothly away over clear terrain, skirting rocks and cliffs without hopping into the air.</summary>
         public void StartFlee()
         {
             float now = Time.time;
             _fleePendingAt = -1f;
             _fleeUntil = now + FleeTime;
-            _nextFleeHop = now + 0.05f;
-            _nextFleeBlink = now + U.Rand(0.8f, 1.6f);
+            _nextFleeBlink = now + U.Rand(1.1f, 2.0f);
+            _fleeSteerSide = U.Rng.NextDouble() < 0.5 ? -1f : 1f;
+            _fleeLockUntil = 0f;
+            _fleeDir = Vector3.zero;
             _rubberAt = -1f;
             _nextDisguise = Mathf.Max(_nextDisguise, _fleeUntil + U.Rand(4f, 10f));
             _nextBlink = Mathf.Max(_nextBlink, _fleeUntil + U.Rand(4f, 10f));
@@ -2187,37 +2380,155 @@ namespace ClassicSlimes
             TriggerBurst(0.3f);
         }
 
+        static readonly float[] SteerAngles = { 30f, 55f, 80f, 110f, 140f, 165f };
+
+        static bool CanFleeAlong(Vector3 origin, Vector3 dir, float refGroundY, float s, float dist)
+        {
+            if (Physics.SphereCast(origin + Vector3.up * (0.38f * s), 0.26f * s, dir, out var wallHit, dist, U.GroundMask, QueryTriggerInteraction.Ignore)
+                && wallHit.normal.y < 0.82f)
+                return false;
+            foreach (float mul in new[] { 0.55f, 1.0f })
+            {
+                var probe = origin + dir * (dist * mul) + Vector3.up * (1.1f * s);
+                if (!Physics.Raycast(probe, Vector3.down, out var gHit, 4.2f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) return false;
+                if (gHit.normal.y < 0.80f) return false;
+                if (gHit.point.y - refGroundY > 0.48f * s) return false;
+                if (Physics.Raycast(probe, Vector3.down, out var wHit, gHit.distance, WaterMask, QueryTriggerInteraction.Collide)
+                    && (gHit.distance - wHit.distance > 0.35f * s))
+                    return false;
+            }
+            return true;
+        }
+
+        static bool SafeFlatGround(Vector3 around, Vector3 dir, float minR, float maxR, float spreadDeg, float originY, float s, out Vector3 point)
+        {
+            dir.y = 0f;
+            bool random = dir.sqrMagnitude < 1e-4f;
+            if (!random) dir.Normalize();
+            var lift = Vector3.up * (0.5f * s);
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 d = random
+                    ? Quaternion.Euler(0f, U.Rand(0f, 360f), 0f) * Vector3.forward
+                    : Quaternion.Euler(0f, U.Rand(-spreadDeg, spreadDeg), 0f) * dir;
+                var probe = around + d * U.Rand(minR, maxR) + Vector3.up * (2.0f * s);
+                if (Physics.Linecast(around + lift, probe, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                if (!Physics.Raycast(probe, Vector3.down, out var hit, 6.5f * s, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                if (hit.normal.y < 0.82f || hit.point.y > originY + 0.55f * s) continue;
+                if (Physics.Linecast(around + lift, hit.point + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                if (Physics.Raycast(probe, Vector3.down, out var wHit, hit.distance, WaterMask, QueryTriggerInteraction.Collide)
+                    && (hit.distance - wHit.distance > 0.35f * s))
+                    continue;
+                point = hit.point;
+                return true;
+            }
+            point = around;
+            return false;
+        }
+
+        void FixedUpdate()
+        {
+            float now = Time.time;
+            if (now >= _fleeUntil || _rb == null || _rb.isKinematic) return;
+            if (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())) return;
+            if (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) return;
+
+            float s = Mathf.Max(0.3f, transform.lossyScale.x);
+            var pos = transform.position;
+            float dt = Time.fixedDeltaTime;
+            bool grounded = Physics.Raycast(pos + Vector3.up * (0.42f * s), Vector3.down, out var gHit, 1.45f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
+            float groundY = grounded ? gHit.point.y : pos.y - 0.5f * s;
+
+            var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
+            var away = pl != null ? pos - nearPlPos : transform.forward;
+            away.y = 0f;
+            away = away.sqrMagnitude > 1e-4f ? away.normalized : transform.forward;
+
+            // Already pushed onto a boulder/cliff face (>38.7 deg): slide immediately downhill off the rock.
+            if (grounded && gHit.normal.y < 0.78f)
+            {
+                var down = Vector3.ProjectOnPlane(Vector3.down, gHit.normal);
+                down.y = 0f;
+                if (down.sqrMagnitude > 1e-4f)
+                {
+                    _fleeDir = (down.normalized * 0.75f + away * 0.25f).normalized;
+                    _fleeLockUntil = now + 0.2f;
+                }
+            }
+            else
+            {
+                float lookDist = 2.8f * s;
+                if (now >= _fleeLockUntil || _fleeDir.sqrMagnitude < 0.25f || !CanFleeAlong(pos, _fleeDir, groundY, s, lookDist))
+                {
+                    if (CanFleeAlong(pos, away, groundY, s, lookDist))
+                    {
+                        _fleeDir = away;
+                    }
+                    else
+                    {
+                        bool found = false;
+                        foreach (float ang in SteerAngles)
+                        {
+                            foreach (float sign in new[] { _fleeSteerSide, -_fleeSteerSide })
+                            {
+                                var cand = Quaternion.Euler(0f, sign * ang, 0f) * away;
+                                if (!CanFleeAlong(pos, cand, groundY, s, lookDist)) continue;
+                                _fleeDir = cand;
+                                _fleeSteerSide = sign;
+                                _fleeLockUntil = now + 0.32f;
+                                found = true;
+                                break;
+                            }
+                            if (found) break;
+                        }
+                        if (!found) { _fleeDir = -away; _fleeLockUntil = now + 0.25f; }
+                    }
+                }
+            }
+
+            if (_fleeDir.sqrMagnitude < 1e-4f) _fleeDir = away;
+
+            if (grounded)
+            {
+                var tang = Vector3.ProjectOnPlane(_fleeDir, gHit.normal);
+                tang = tang.sqrMagnitude > 1e-4f ? tang.normalized : _fleeDir;
+                if (tang.y > 0.16f) { tang.y = 0.16f; tang.Normalize(); }
+                var targetVel = tang * FleeSpeed;
+                var nv = Vector3.MoveTowards(_rb.linearVelocity, targetVel, FleeAccel * dt);
+                nv.y = Mathf.Min(nv.y, Mathf.Max(0.12f, targetVel.y));
+                _rb.linearVelocity = nv;
+                _rb.AddForce(-gHit.normal * 22f, ForceMode.Acceleration);
+            }
+            else
+            {
+                var v = _rb.linearVelocity;
+                var horiz = Vector2.MoveTowards(new Vector2(v.x, v.z), new Vector2(_fleeDir.x, _fleeDir.z) * (FleeSpeed * 0.8f), 18f * dt);
+                _rb.linearVelocity = new Vector3(horiz.x, Mathf.Min(v.y, 0.15f), horiz.y);
+                _rb.AddForce(Vector3.down * 24f, ForceMode.Acceleration);
+            }
+            _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(_fleeDir, Vector3.up), 16f * dt));
+        }
+
         void Flee(float now)
         {
             if (_rb == null || _rb.isKinematic) return;
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
             var pos = transform.position;
             var pl = CoopCompat.NearestPlayer(pos, out var nearPlPos, out _);
-            var away = pl != null ? pos - nearPlPos : transform.forward;
-            away.y = 0f;
-            float dist = away.magnitude;
-            if (pl != null && dist > 32f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }   // got away
-            away = dist > 0.01f ? away / dist : Vector3.forward;
-            if (!U.Grounded(transform, s)) return;
-            if (now > _nextFleeBlink)
+            if (pl != null && Vector3.Distance(pos, nearPlPos) > 34f && now > _fleeUntil - FleeTime + 1.5f) { _fleeUntil = now; return; }
+            if (now > _nextFleeFx)
             {
-                _nextFleeBlink = now + U.Rand(1.2f, 2.2f);
-                var lift = Vector3.up * (0.5f * s);
-                if (U.GroundPointToward(pos, away, 4.5f * s, 8f * s, 40f, out var to) && !Physics.Linecast(pos + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore))
-                {
-                    Jump(to, true);
-                    return;
-                }
+                _nextFleeFx = now + U.Rand(0.14f, 0.24f);
+                if (_pixels != null) _pixels.Emit(U.Rng.Next(2, 5));
+                if (U.Rng.NextDouble() < 0.4) TriggerBurst(U.Rand(0.06f, 0.14f));
             }
-            if (now < _nextFleeHop) return;
-            _nextFleeHop = now + U.Rand(0.1f, 0.2f);
-            var dir = Quaternion.Euler(0f, U.Rand(-35f, 35f), 0f) * away;
-            if (Physics.Raycast(pos + Vector3.up * (0.4f * s), dir, 2.6f * s, U.GroundMask, QueryTriggerInteraction.Ignore))
-                dir = Quaternion.Euler(0f, U.Rng.NextDouble() < 0.5 ? -80f : 80f, 0f) * dir;   // wall ahead: veer off
-            _rb.linearVelocity = dir * FleeHop + Vector3.up * FleeLift;
-            _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));
-            if (_pixels != null) _pixels.Emit(U.Rng.Next(2, 5));
-            if (U.Rng.NextDouble() < 0.4) TriggerBurst(U.Rand(0.06f, 0.14f));
+            if (now > _nextFleeBlink && U.Grounded(transform, s))
+            {
+                _nextFleeBlink = now + U.Rand(1.4f, 2.4f);
+                var away = _fleeDir.sqrMagnitude > 0.25f ? _fleeDir : (pl != null ? pos - nearPlPos : transform.forward);
+                if (SafeFlatGround(pos, away, 4.0f * s, 7.5f * s, 32f, pos.y, s, out var to))
+                    Jump(to, true);
+            }
         }
 
         /// <summary>Water stabilises it: reveals a disguise, then no disguises or blinks for a while.</summary>
@@ -2245,14 +2556,23 @@ namespace ClassicSlimes
             float s = Mathf.Max(0.3f, transform.lossyScale.x);
             if (!dev && !U.Grounded(transform, s)) return;
             var from = transform.position;
-            var lift = Vector3.up * (0.5f * s);
-            for (int i = 0; i < 4; i++)
+            if (dev)
             {
-                if (!U.GroundPoint(from, 2f * s, 5f * s, out var to)) continue;
-                if (Physics.Linecast(from + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
-                Jump(to, true);
-                if (U.Rng.NextDouble() < 0.3) { _rubberPos = from; _rubberAt = now + U.Rand(0.3f, 0.45f); }
+                var lift = Vector3.up * (0.5f * s);
+                for (int i = 0; i < 4; i++)
+                {
+                    if (!U.GroundPoint(from, 2f * s, 5f * s, out var to)) continue;
+                    if (Physics.Linecast(from + lift, to + lift, U.GroundMask, QueryTriggerInteraction.Ignore)) continue;
+                    Jump(to, true);
+                    if (U.Rng.NextDouble() < 0.3) { _rubberPos = from; _rubberAt = now + U.Rand(0.3f, 0.45f); }
+                    return;
+                }
                 return;
+            }
+            if (SafeFlatGround(from, Vector3.zero, 2f * s, 5f * s, 180f, from.y, s, out var flatTo))
+            {
+                Jump(flatTo, true);
+                if (U.Rng.NextDouble() < 0.3) { _rubberPos = from; _rubberAt = now + U.Rand(0.3f, 0.45f); }
             }
         }
 
@@ -2277,8 +2597,14 @@ namespace ClassicSlimes
         void Debug()
         {
             _debugged = true;
+            bool rad = IsRadiant;
             var p = transform.position + Vector3.up * 0.5f;
-            Fx.Play("fxNewbuckExplosion_small", p);
+            if (rad)
+            {
+                var bigFx = Fx.Play("fxNewbuckExplosion_Large", p) ?? Fx.Play("fxNewbuckExplosion_Med", p) ?? Fx.Play("fxNewbuckExplosion_small", p);
+                if (bigFx == null) Fx.Play("fxNewbuckExplosion_small", p, 1.5f);
+            }
+            else Fx.Play("fxNewbuckExplosion_small", p);
             Fx.Play("FX Despawn", p);
             Snd.Play(Snd.GlitchSplit, p);
             if (_burst != null)   // the last pixels stay behind
@@ -2288,7 +2614,7 @@ namespace ClassicSlimes
             }
             try
             {
-                int reward = Cfg.GlitchDebugReward.Value;
+                int reward = Cfg.GlitchDebugReward.Value * (rad ? 4 : 1);
                 if (reward > 0) SceneContext.Instance.PlayerState.AddCurrency(CurrencyDefinitionExtensions.GetDefaultCurrencyIfNull(null), reward, true, null);
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("Glitch reward: " + e.Message); }
@@ -2319,40 +2645,56 @@ namespace ClassicSlimes
 
         SlimeAppearance PickTarget()
         {
+            bool rad = IsRadiant;
             var candidates = new List<SlimeAppearance>();
             foreach (var c in Physics.OverlapSphere(transform.position, 25f, U.SlimeMask, QueryTriggerInteraction.Ignore))
             {
                 var rb = c != null ? c.attachedRigidbody : null;
                 if (rb == null || rb.gameObject == gameObject || rb.GetComponent<GlitchSlime>() != null) continue;
                 var ap = rb.GetComponent<SlimeAppearanceApplicator>();
+                var sd = ap != null ? ap.SlimeDefinition : null;
                 var a = ap != null ? ap.Appearance : null;
+                if (a == null) continue;
+                if (rad && !RadiantLooks.IsRadiantAppearance(a) && sd != null)
+                    a = sd.RadiantBase ?? sd.RadiantLargo0 ?? a;
+                else if (!rad && RadiantLooks.IsRadiantAppearance(a) && sd?.AppearancesDefault != null && sd.AppearancesDefault.Length > 0)
+                    a = sd.AppearancesDefault[0];
                 if (a != null && !candidates.Contains(a)) candidates.Add(a);
             }
             if (candidates.Count == 0)
             {
                 foreach (var n in new[] { "Pink", "Tabby", "Phosphor", "Rock", "Cotton", "Honey", "Boom", "Crystal", "Batty", "Angler", "Ringtail", "Hunter" })
                 {
-                    try { var d = CottonLibrary.Library.GetSlime(n); if (d != null) candidates.Add(d.AppearancesDefault[0]); } catch { }
+                    try
+                    {
+                        var d = CottonLibrary.Library.GetSlime(n);
+                        if (d == null) continue;
+                        var app = rad ? (d.RadiantBase ?? d.AppearancesDefault?[0]) : d.AppearancesDefault?[0];
+                        if (app != null) candidates.Add(app);
+                    }
+                    catch { }
                 }
             }
             for (int tries = 0; tries < 6 && candidates.Count > 0; tries++)
             {
                 var a = candidates[U.Rng.Next(candidates.Count)];
                 if (!BonesOk(a)) { candidates.Remove(a); continue; }
-                return DisguiseOf(a);
+                return DisguiseOf(a, rad);
             }
             return null;
         }
 
-        static SlimeAppearance DisguiseOf(SlimeAppearance a)
+        static SlimeAppearance DisguiseOf(SlimeAppearance a, bool radiant)
         {
-            if (Disguises.TryGetValue(a.Pointer, out var d) && d != null) return d;
+            if (Disguises.TryGetValue((a.Pointer, radiant), out var d) && d != null) return d;
             d = Object.Instantiate(a);
-            d.name = "GlitchDisguise_" + a.name;
+            d.name = (radiant ? "GlitchRadDisguise_" : "GlitchDisguise_") + a.name;
             d.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            if (!radiant) d._appearType = SlimeAppearance.AppearanceType.DEFAULT;
             var face = WrongFace(a._face);
             if (face != null) d._face = face;
-            Disguises[a.Pointer] = d;
+            Disguises[(a.Pointer, radiant)] = d;
+            DisguisePtrs.Add(d.Pointer);
             return d;
         }
 
