@@ -5,7 +5,7 @@ using Il2CppInterop.Runtime.Injection;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.3.8", "ClassicSlimes")]
+[assembly: MelonInfo(typeof(ClassicSlimes.ClassicSlimesMod), "Classic Slimes", "1.3.9", "ClassicSlimes")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 [assembly: MelonAdditionalDependencies("CottonLibrary")]
 
@@ -88,7 +88,9 @@ namespace ClassicSlimes
             }
             try { Foods.EnsurePediaDirectorLinks(); } catch { }
             try { RadiantLooks.RegisterRadiantSpawns(); } catch { }
+            try { RadiantLooks.EnsureRadiantPediaCategory(); } catch { }
             try { PediaArt.RegisterPersistence(); } catch { }
+            try { Behaviours.ClearSession(); } catch { }
             try { Behaviours.AttachToLive(); } catch (Exception e) { Log.Error("AttachToLive failed: " + e); }
             if (Diag.Enabled) MelonCoroutines.Start(RuntimeDiag());
         }

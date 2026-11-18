@@ -25,6 +25,8 @@ namespace ClassicSlimes
         public static Material QsRadiantChargedMat { get; private set; }
 
         static readonly Dictionary<string, SlimeFace> _radLargoRadiantFaces = new();
+        static readonly List<(SlimeSpec Spec, Color Top, Color Mid, Color Bot)> _builtPediaSpecs = new();
+        static Il2CppMonomiPark.SlimeRancher.Pedia.PediaCategory _radCategory;
 
         public static bool IsRadiantAppearance(SlimeAppearance app) =>
             app != null && (app._appearType != SlimeAppearance.AppearanceType.DEFAULT
@@ -34,6 +36,7 @@ namespace ClassicSlimes
 
         public static void BuildAll()
         {
+            _builtPediaSpecs.Clear();
             SlimeAppearance pinkRad = null;
             try { pinkRad = Library.GetSlime("Pink")?.RadiantBase; } catch { }
             if (pinkRad == null)
@@ -54,6 +57,118 @@ namespace ClassicSlimes
             if (TryBuild("Quicksilver", s => BuildQuicksilverRadiant(s, pinkRad))) built++;
             ClassicSlimesMod.Log.Msg($"Radiants: built {built} classic RadiantBase variants");
             try { RegisterRadiantSpawns(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Radiant spawns register: " + e.Message); }
+            try { RegisterRadiantPediaEntries(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Radiant pedia register: " + e.Message); }
+        }
+
+        public static void RegisterRadiantPediaEntries()
+        {
+            if (!Available || _builtPediaSpecs.Count == 0) return;
+            Il2CppMonomiPark.SlimeRancher.Pedia.RadiantSlimePediaEntry pinkRadEntry = null;
+            foreach (var e in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Pedia.RadiantSlimePediaEntry>())
+            {
+                if (e == null) continue;
+                if (e.SlimeDefinition != null && e.SlimeDefinition.name == "Pink") { pinkRadEntry = e; break; }
+                pinkRadEntry ??= e;
+            }
+            if (pinkRadEntry == null)
+            {
+                ClassicSlimesMod.Log.Warning("Radiant pedia: no template RadiantSlimePediaEntry found");
+                return;
+            }
+
+            foreach (var item in _builtPediaSpecs)
+            {
+                var s = item.Spec;
+                if (s?.Def == null || s.Def.RadiantBase == null) continue;
+                if (PediaArt.RadiantBySlime.ContainsKey(s.Def.Pointer)) continue;
+                var re = Object.Instantiate(pinkRadEntry);
+                Object.DontDestroyOnLoad(re);
+                re.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+                re.name = "radiant_" + s.Key + "_slime";
+                re._slimeDefinition = s.Def;
+                re._title = s.Def.localizedName;
+                try { re._description = CottonLibrary.Library.CreateLocalizedString("m.intro." + s.Key + "_slime", "Pedia"); } catch { }
+                string pid = null;
+                try { pid = re.PersistenceId; } catch { }
+                string pinkPid = null;
+                try { pinkPid = pinkRadEntry.PersistenceId; } catch { }
+                if (string.IsNullOrEmpty(pid) || pid == pinkPid)
+                    re._persistenceId = re.name;
+                var iconSp = s.Def.RadiantBase._icon ?? s.Def.icon;
+                try { re.SetIconAndArt(iconSp, new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("")); }
+                catch { }
+                var cardSp = MakeRadiantPediaArt(s, item.Top, item.Mid, item.Bot) ?? iconSp;
+                PediaArt.RegisterRadiant(s.Def, re, cardSp);
+            }
+            EnsureRadiantPediaCategory();
+            PediaArt.RegisterPersistence();
+        }
+
+        public static void EnsureRadiantPediaCategory()
+        {
+            if (PediaArt.RadiantBySlime.Count == 0) return;
+            if (_radCategory == null)
+            {
+                foreach (var cfg in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirectorConfiguration>())
+                    if (cfg?.PediaCategory != null) { _radCategory = cfg.PediaCategory; break; }
+            }
+            if (_radCategory == null)
+            {
+                foreach (var cat in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Pedia.PediaCategory>())
+                {
+                    if (cat == null || cat._items == null) continue;
+                    foreach (var it in cat._items)
+                    {
+                        if (it != null && it.TryCast<Il2CppMonomiPark.SlimeRancher.Pedia.RadiantSlimePediaEntry>() != null)
+                        {
+                            _radCategory = cat;
+                            break;
+                        }
+                    }
+                    if (_radCategory != null) break;
+                }
+            }
+            if (_radCategory == null) return;
+
+            var arrList = new List<Il2CppMonomiPark.SlimeRancher.Pedia.PediaEntry>();
+            var seen = new HashSet<IntPtr>();
+            if (_radCategory._items != null)
+            {
+                foreach (var it in _radCategory._items)
+                    if (it != null && seen.Add(it.Pointer)) arrList.Add(it);
+            }
+            int added = 0;
+            foreach (var kv in PediaArt.RadiantBySlime)
+            {
+                var re = kv.Value;
+                if (re != null && seen.Add(re.Pointer)) { arrList.Add(re); added++; }
+            }
+            if (added > 0) _radCategory._items = Gc.Array(arrList);
+
+            try
+            {
+                var rt = _radCategory.GetRuntimeCategory()?.TryCast<Il2CppMonomiPark.SlimeRancher.Pedia.PediaRuntimeCategory>();
+                EnsureRadiantEntriesInRuntimeList(rt?._items);
+            }
+            catch { }
+            try
+            {
+                var rt = SceneContext.Instance?.PediaDirector?.FindRuntimeCategory(_radCategory.Cast<Il2CppMonomiPark.SlimeRancher.Pedia.IPediaCategory>())?.TryCast<Il2CppMonomiPark.SlimeRancher.Pedia.PediaRuntimeCategory>();
+                EnsureRadiantEntriesInRuntimeList(rt?._items);
+            }
+            catch { }
+            if (added > 0)
+                ClassicSlimesMod.Log.Msg($"Radiants: registered {PediaArt.RadiantBySlime.Count} classic Radiant entries in Pedia category '{_radCategory.name}'");
+        }
+
+        internal static void EnsureRadiantEntriesInRuntimeList(Il2CppSystem.Collections.Generic.List<Il2CppMonomiPark.SlimeRancher.Pedia.PediaEntry> list)
+        {
+            if (list == null || PediaArt.RadiantBySlime.Count == 0) return;
+            var seen = new HashSet<IntPtr>();
+            for (int i = 0; i < list.Count; i++)
+                if (list[i] != null) seen.Add(list[i].Pointer);
+            foreach (var kv in PediaArt.RadiantBySlime)
+                if (kv.Value != null && seen.Add(kv.Value.Pointer)) list.Add(kv.Value);
         }
 
         public static void RegisterRadiantSpawns()
@@ -162,12 +277,19 @@ namespace ClassicSlimes
             }, false);
         }
 
-        static Sprite MakeRadiantIcon(SlimeSpec s, Color top, Color mid, Color bot)
+        static Sprite MakeRadiantIcon(SlimeSpec s, Color top, Color mid, Color bot) =>
+            MakeRadiantArtwork(s, "iconSlime" + s.Name + ".png", "iconSlime" + s.Name + "Radiant", top, mid, bot) ?? s.Def.icon;
+
+        static Sprite MakeRadiantPediaArt(SlimeSpec s, Color top, Color mid, Color bot) =>
+            MakeRadiantArtwork(s, "pediaSlime" + s.Name + ".png", "pediaSlime" + s.Name + "Radiant", top, mid, bot)
+            ?? MakeRadiantArtwork(s, "iconSlime" + s.Name + ".png", "pediaSlime" + s.Name + "Radiant", top, mid, bot);
+
+        static Sprite MakeRadiantArtwork(SlimeSpec s, string resFile, string spriteName, Color top, Color mid, Color bot)
         {
             try
             {
-                var bytes = Res.Bytes("iconSlime" + s.Name + ".png");
-                if (bytes == null) return s.Def.icon;
+                var bytes = Res.Bytes(resFile);
+                if (bytes == null) return null;
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 Il2CppImageConversionManager.LoadImage(tex, bytes, false);
                 int w = tex.width, h = tex.height;
@@ -214,16 +336,16 @@ namespace ClassicSlimes
                 tex.Apply(false, true);
                 tex.filterMode = FilterMode.Bilinear;
                 tex.wrapMode = TextureWrapMode.Clamp;
-                tex.name = "iconSlime" + s.Name + "Radiant";
+                tex.name = spriteName;
                 tex.hideFlags = HideFlags.HideAndDontSave;
                 Object.DontDestroyOnLoad(tex);
                 var sp = Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f);
-                sp.name = "iconSlime" + s.Name + "Radiant";
+                sp.name = spriteName;
                 sp.hideFlags = HideFlags.HideAndDontSave;
                 Object.DontDestroyOnLoad(sp);
                 return sp;
             }
-            catch { return s.Def.icon; }
+            catch { return null; }
         }
 
         static SlimeAppearance FinalizeRadiantApp(SlimeSpec s, SlimeAppearance pinkRad, Material bodyMat, Material partMat, SlimeFace face,
@@ -317,6 +439,8 @@ namespace ClassicSlimes
                 }
                 catch { }
             }
+            if (!_builtPediaSpecs.Exists(x => x.Spec.Def.Pointer == def.Pointer))
+                _builtPediaSpecs.Add((s, top, mid, bot));
             return radApp;
         }
 

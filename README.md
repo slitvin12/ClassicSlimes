@@ -6,7 +6,7 @@
 
 > *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.0 / 2.1.0-rc4 co-op support.
 
-**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.8 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
+**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.9 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.3** · Неофициальный фанатский мод, не связан с Monomi Park.
 
 ## Установка
 Нужны только **Slime Rancher 2** и **MelonLoader 0.7+**. **Slime Rancher 1 не нужен:** модели, текстуры, звуки и
@@ -20,12 +20,20 @@
    `CottonLibrary.dll` одновременно нельзя). CottonForge — прямая замена: другие Cotton-моды работают без пересборки.
 3. Скачать `ClassicSlimes.dll` из [релиза](https://github.com/slitvin12/ClassicSlimes/releases/latest) и положить
    туда же. Итог: `Mods\CottonLibrary.dll` + `Mods\ClassicSlimes.dll`.
-4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.8`.
+4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.3 ...` и `Classic Slimes v1.3.9`.
    Первый показ главного меню на ~10 с дольше обычного — генерируются ларго.
 
 Версии 1.2.x–1.3.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
 должен запускаться без этих стилей, но такая связка в 1.2.x–1.3.x не проверялась.
 Удаление — убрать `ClassicSlimes.dll`; слаймы и ларго мода при этом пропадут из сохранения (см. «Известные проблемы»).
+
+## Новое в 1.3.9
+
+- **Надёжность сохранений и Слаймопедии (`SaveGuard`, `Pedia`, `Foods`, `Gordos` + CottonForge 0.3.3).** Устранены причины поломок сейвов и потери прогресса при перезагрузке: очистка неизвестных записей теперь чистит и `LostRadiantIdQueue` / `LostRadiantTimeQueue`, добавлена защита `SlimeRadiant.SetRadiantAppearance` от пропавших radiant-вариантов, корректно откатываются маскировки `GlitchSlime` в `GameModelPullHelpers.PullActors`, сохраняются слоты/префабы при отключении опций в конфиге (`Classic*Gordo` load-заглушки, `MakeVaccable` / меши еды, осторожная обработка `ignoreOnLoad` для `LemonPhase`), а статьи Слаймопедии получают собственный `_persistenceId` и не сбрасываются при повторной загрузке.
+- **Исправление захвата Quicksilver (ртутного слайма) вакпаком, ровный бег и шлейф (`Behaviours`, `Looks`).** Устранён конфликт физического прижима и параллакса сопла: `QuicksilverSlime` теперь отслеживает реальный захват потоком (`_vac.IsCaptive()`, `_animatingConsume`, `MoveTowards`) и конус ствола `VacuumItem.VacOrigin` + коллайдер `VacRegion`, плавно притормаживает во встречном потоке пылесоса и не вырывается вниз у самого дула (`ResistTime = 0.85 с`, `TiredTime = 4.2 с`). При наземном беге фиксируется наклон корпуса (`FreezeRotationX | FreezeRotationZ` + обнуление угловой скорости и `groundStickiness = 0`), поэтому ртутный слайм больше не бежит носом в пол, а двойной серебристо-голубой ленточный шлейф (`qsstreak_v2`) чётко виден на скорости.
+- **Лучистые слаймы в Слаймопедии (`RadiantLooks`, `Pedia`, `Main`).** Все 4 классических лучистых варианта (**Mosaic**, **Rad**, **Glitch**, **Quicksilver**) регистрируются в родной вкладке **Radiant Slimes** (`PediaRadiantSlimeScreen`), сетка кнопок динамически расширяется с 22 до 26 ячеек без ошибок переполнения индекса и с корректной синхронизацией разблокировки через `UnlockRadiantPediaEntry`, а карточки получают авторские стикеры в голографической рамке с теневым силуэтом и собственным описанием.
+- **Аутентичная SR1-механика дерева Фазового лимона (`Foods`, `CoopCompat`).** Призрачные плоды `LemonPhase` на ветках стали по-настоящему нематериальными (`isTrigger = true`, отключена цель еды для слаймов на ветках), триггер обмена привязан к кроне (`BoxCollider`, `minY >= 1.75 м`) и проверенному слою совместимому с `Layers.Launched` и `Layers.Actor`, игнорирует гнилые или захваченные потоком фрукты (`State.EDIBLE`, `!IsCaptive()`) и надёжно обменивает 1-к-1 выстреленный съедобный фрукт (`DestroyPhaseFruit`) на твёрдый `LemonFruit` без повторного срабатывания и сбоев от прикосновения.
+- **Автоматизированные внутриигровые тесты (`DevCmd`).** Добавлены консольные проверки `vactest` (захват и выстрел обычного/лучистого/заряженного Quicksilver реальным `VacuumItem`), `qsshow`, `lemontest` (нематериальность, ложные касания и реальный бросок `Layers.Launched`), `pediatest` (`12/12`), `pediarad` и `ammotest` для полного прогона цикла «сохранить -> перезапустить -> загрузить».
 
 ## Новое в 1.3.8
 
@@ -64,7 +72,7 @@
 ## Совместимость с другими модами
 
 - **Lycoreia 2.0 / 2.1.0-rc4 (кооп SR2):** поддерживается кооперативная синхронизация слаймов, еды и гордо (мод должен быть установлен у всех участников сессии).
-- **[Creator Toolkit](https://github.com/slitvin12/SR2-CreatorToolkit) (0.9.1+) и [SlimeMap](https://github.com/slitvin12/SlimeMap) (1.1.1+):** классические гордо (`Rad`, `Quantum`, `Mosaic`) отображаются на карте и в трекере с собственными иконками, а у ларго на компасе показывается иконка базового слайма.
+- **[Creator Toolkit](https://github.com/slitvin12/SR2-CreatorToolkit) (0.9.2+) и [SlimeMap](https://github.com/slitvin12/SlimeMap) (1.1.1+):** классические гордо (`Rad`, `Quantum`, `Mosaic`) отображаются на карте и в трекере с собственными иконками, у ларго на компасе показывается иконка базового слайма, а во вкладке спавна «Лучистые» в Creator Toolkit доступны все 4 классических лучистых слайма (`Mosaic`, `Rad`, `Glitch`, `Quicksilver`).
 - **[SlimeFPS](https://github.com/slitvin12/SlimeFPS) (1.1.1+):** частицы и ауры классических слаймов защищены от урезания в пресетах оптимизации, а сканлайны не теряют чёткость при снижении мип-уровней текстур.
 - **ChknnRancherMod:** несовместим с диким спавном слаймов — заменяет все наборы спавнеров на кур (подробнее в «Известные проблемы»).
 

@@ -95,13 +95,13 @@ namespace ClassicSlimes
                     string refId = string.IsNullOrEmpty(t.referenceId) ? "IdentifiableType." + t.name : t.referenceId;
                     t.referenceId = refId;
                     Invoke("INTERNAL_SetupLoadForIdent", refId, t);
+                    Library.MakeVaccable(t);
                     if (!enabled) continue;
                     var group = f.Fruit ? Library.fruits : Library.veggies;
                     AddTo(group, t);
                     SlimeFactory.RegisterGroupByName("IdentifiableTypesGroup", t);
                     SlimeFactory.RegisterGroupByName(f.Fruit ? "FruitQuantumCloudGroup" : "VeggieQuantumCloudGroup", t);
                     if (t.groupType == null) t.groupType = group;
-                    Library.MakeVaccable(t);
                     t.localizedName = Library.CreateLocalizedString(f.Key);
                     string shown = null;
                     try { shown = t.localizedName?.GetLocalizedString(); } catch { }
@@ -110,7 +110,13 @@ namespace ClassicSlimes
                 }
                 catch (Exception e) { ClassicSlimesMod.Log.Error($"Food {f.Ident}: {e}"); }
             }
-            if (!enabled) { SetupPhaseLemonLoadOnly(byName); return; }
+            if (!enabled)
+            {
+                try { FixLemonModels(); } catch { }
+                try { FixFoodRootMeshes(); } catch { }
+                SetupPhaseLemonLoadOnly(byName);
+                return;
+            }
             Ready = All.Any(f => f.Type != null);
             if (!Ready) return;
             // food-group based diets were built before the new members existed
@@ -186,6 +192,8 @@ namespace ClassicSlimes
                 );
                 if (entry != null)
                 {
+                    Object.DontDestroyOnLoad(entry);
+                    entry.hideFlags |= HideFlags.DontUnloadUnusedAsset;
                     try
                     {
                         t._fullArt = new UnityEngine.AddressableAssets.AssetReferenceT<Sprite>("");
@@ -248,7 +256,7 @@ namespace ClassicSlimes
         /// <summary>Empty lemon MeshFilters under root get the SR1 mesh (all = any empty renderer, e.g. tree spawn joints).</summary>
         internal static int FixLemon(GameObject root, bool all)
         {
-            if (root == null || !Cfg.EnableFoods.Value) return 0;
+            if (root == null) return 0;
             var mesh = Res.Mesh("phaseLemon");
             if (mesh == null) return 0;
             int n = 0;
@@ -311,7 +319,7 @@ namespace ClassicSlimes
             if (gm == null || _phase == null) return;
             try
             {
-                if (gm.ignoreOnLoad != null)
+                if (Cfg.EnableFoods.Value && Cfg.PhaseLemonTrees.Value && gm.ignoreOnLoad != null)
                 {
                     gm.ignoreOnLoad._memberTypes?.Remove(_phase);
                     var rt = gm.ignoreOnLoad.GetRuntimeObject();
@@ -322,6 +330,19 @@ namespace ClassicSlimes
                     }
                 }
                 if (_phase != null) gm.phaseLemonIdent = _phase;
+            }
+            catch { }
+        }
+
+        internal static void MakePhaseIntangible(GameObject go)
+        {
+            if (go == null) return;
+            try
+            {
+                foreach (var c in go.GetComponents<Collider>())
+                    if (c != null) c.isTrigger = true;
+                var edible = go.transform.Find("Slime Edible");
+                if (edible != null && edible.gameObject.activeSelf) edible.gameObject.SetActive(false);
             }
             catch { }
         }
@@ -377,6 +398,7 @@ namespace ClassicSlimes
                 rc.DestroyFX = _phaseOutFx;
             }
             FixLemon(p.prefab, false);
+            MakePhaseIntangible(p.prefab);
             var lemonMesh = Res.Mesh("phaseLemon");
             // solid body = the real lemon look (PhaseLemonTree flickers it and adds a scanline shell)
             foreach (var mr in p.prefab.GetComponentsInChildren<MeshRenderer>(true))
@@ -418,15 +440,57 @@ namespace ClassicSlimes
             return p;
         }
 
+        static int _phasorLayer = -1;
+
+        static int ResolvePhasorLayer()
+        {
+            if (_phasorLayer >= 0) return _phasorLayer;
+            int actorBit = 1 << Layers.Actor;
+            int launchBit = 1 << Layers.Launched;
+            int want = actorBit | launchBit;
+            int[] candidates = { Layers.ActorTrigger, Layers.Default, Layers.EnvironmentInteraction, Layers.Interactable };
+            foreach (int cand in candidates)
+            {
+                if (cand < 0 || cand > 31) continue;
+                try
+                {
+                    int m = Layers.GetLayersCollidedWith(cand).value;
+                    if ((m & want) == want)
+                    {
+                        _phasorLayer = cand;
+                        ClassicSlimesMod.Log?.Msg($"[phaselemon] phasor layer={cand} (Actor={((m & actorBit) != 0)} Launched={((m & launchBit) != 0)} mask=0x{m:X})");
+                        return _phasorLayer;
+                    }
+                }
+                catch { }
+            }
+            for (int cand = 0; cand < 32; cand++)
+            {
+                if (cand == Layers.UI || cand == Layers.VacCone) continue;
+                try
+                {
+                    int m = Layers.GetLayersCollidedWith(cand).value;
+                    if ((m & want) == want)
+                    {
+                        _phasorLayer = cand;
+                        ClassicSlimesMod.Log?.Msg($"[phaselemon] phasor fallback layer={cand} (mask=0x{m:X})");
+                        return _phasorLayer;
+                    }
+                }
+                catch { }
+            }
+            _phasorLayer = Layers.ActorTrigger;
+            return _phasorLayer;
+        }
+
         static void AddPhasor(SpawnResource sr)
         {
             if (sr.transform.Find(PhasorName) != null) return;
             var go = new GameObject(PhasorName);
-            // ActorTrigger collides with both Layers.Actor and Layers.Launched at point-blank ranch range, and is excluded from vac/UI/gadget raycasts.
-            go.layer = Layers.ActorTrigger;
+            go.layer = ResolvePhasorLayer();
             go.transform.SetParent(sr.transform, false);
-            Vector3 c = new Vector3(0f, 3.0f, 0f);
-            float r = 2.2f;
+            Vector3 boxCenter = new Vector3(0f, 3.0f, 0f);
+            Vector3 boxSize = new Vector3(3.6f, 2.4f, 3.6f);
             var joints = sr.SpawnJoints;
             if (joints != null && joints.Length > 0)
             {
@@ -434,18 +498,26 @@ namespace ClassicSlimes
                 foreach (var j in joints) if (j != null) pts.Add(LocalPosIn(sr.transform, j.transform));
                 if (pts.Count > 0)
                 {
-                    var sum = Vector3.zero;
-                    foreach (var q in pts) sum += q;
-                    c = sum / pts.Count;
-                    float m = 0f;
-                    foreach (var q in pts) m = Mathf.Max(m, (q - c).magnitude);
-                    r = Mathf.Clamp(m + 0.55f, 1.4f, 2.9f);
+                    Vector3 min = pts[0], max = pts[0];
+                    foreach (var q in pts)
+                    {
+                        min = Vector3.Min(min, q);
+                        max = Vector3.Max(max, q);
+                    }
+                    min -= new Vector3(0.65f, 0.35f, 0.65f);
+                    max += new Vector3(0.65f, 0.55f, 0.65f);
+                    // Keep the phasor trigger up in the tree crown (>= 1.75 m) so fruits swirling near the ground/vac barrel never bump into it.
+                    min.y = Mathf.Max(1.75f, min.y);
+                    if (max.y < min.y + 1.2f) max.y = min.y + 1.2f;
+                    boxCenter = (min + max) * 0.5f;
+                    boxSize = max - min;
                 }
             }
-            go.transform.localPosition = c;
-            var sc = go.AddComponent<SphereCollider>();
-            sc.isTrigger = true;
-            sc.radius = r;
+            go.transform.localPosition = boxCenter;
+            var bc = go.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.center = Vector3.zero;
+            bc.size = boxSize;
             var t = go.AddComponent<PhaseLemonTree>();
             t.Sr = sr;
             if (!_phaseInTried) { _phaseInTried = true; try { _phaseInFx = SanitizePhaseFx(Fx.Kept("FX LemonPhaseIn"), "PhaseLemonInClean"); } catch { } }
@@ -564,25 +636,33 @@ namespace ClassicSlimes
 
         static bool _swappingPhaseLemon;
 
-        /// <summary>SR1 LemonPhasor.OnTriggerEnter: a thrown fruit (not a lemon) knocks a ripe phasing lemon loose.</summary>
+        /// <summary>SR1 LemonPhasor.OnTriggerEnter: a thrown edible non-lemon fruit swaps 1-for-1 with a ripe phasing lemon in the tree crown.</summary>
         internal static void OnPhaseTrigger(PhaseLemonTree tree, Collider col)
         {
             if (col == null || col.isTrigger || tree == null || tree.Sr == null || _lemon == null) return;
             var rb = col.attachedRigidbody;
             var go = rb != null ? rb.gameObject : col.gameObject;
+            if (go == null) return;
+            if (tree.ConsumedUntil.TryGetValue(go.Pointer, out float skipUntil) && Time.time < skipUntil) return;
             var ida = go.GetComponent<IdentifiableActor>();
             var t = ida != null ? ida.identType : null;
             if (t == null || t == _lemon || t == _phase || !InGroup(Library.fruits, t)) return;
-            if (!CoopCompat.IsSpawnAuthority(tree.transform.position)) return;
             var vac = go.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
-            if (vac != null && vac.IsHeld()) return;
-            if (!tree.Handled.Add(go.Pointer)) return;
+            if (vac != null && (vac.IsHeld() || vac.IsCaptive())) return;
+            var fruitRc = go.GetComponent<ResourceCycle>();
+            if (fruitRc != null)
+            {
+                try { if (fruitRc.GetState() != ResourceCycle.State.EDIBLE) return; }
+                catch { }
+            }
+            if (!CoopCompat.IsSpawnAuthority(tree.transform.position)) return;
             PhaseTriggers++;
             var joint = tree.Sr.PickRipeResourceJoint();
             var body = joint != null ? joint.connectedBody : null;
             if (Diag.Enabled && _phaseLog++ < 12)
                 ClassicSlimesMod.Log.Msg($"[phaselemon] {t.name} layer={go.layer} hit {tree.Sr.name}: ripe joint={(joint != null ? joint.name : "none")} body={(body != null ? body.name : "-")}");
             if (body == null) return;
+            tree.ConsumedUntil[go.Pointer] = Time.time + 2.5f;
             Vector3 pos = joint.transform.position;
             Quaternion rot = joint.transform.rotation;
             Vector3 fruitPos = go.transform.position;
@@ -614,7 +694,7 @@ namespace ClassicSlimes
             }
             PlayFx(_phaseInFx != null ? _phaseInFx : _phaseOutFx, pos);
             PlayFx(_phaseOutFx, fruitPos);
-            CoopCompat.DestroySharedActor(go, "ClassicSlimes.LemonPhasor", false);
+            CoopCompat.DestroyPhaseFruit(go);
             PhaseHits++;
         }
 
@@ -634,6 +714,7 @@ namespace ClassicSlimes
 
         static PhaseLemon MakePhaseLook(GameObject go)
         {
+            MakePhaseIntangible(go);
             MeshRenderer solid = null; MeshFilter mf = null;
             foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
             {
@@ -698,6 +779,12 @@ namespace ClassicSlimes
             if (now >= t.NextScan)
             {
                 t.NextScan = now + 0.4f;
+                if (t.ConsumedUntil.Count > 0)
+                {
+                    var drop = new List<IntPtr>();
+                    foreach (var kv in t.ConsumedUntil) if (kv.Value <= now) drop.Add(kv.Key);
+                    foreach (var ptr in drop) t.ConsumedUntil.Remove(ptr);
+                }
                 foreach (var l in t.Lemons) l.Seen = false;
                 var joints = t.Sr != null ? t.Sr.SpawnJoints : null;
                 if (joints != null)
@@ -856,6 +943,10 @@ namespace ClassicSlimes
             if (t == null) return "unknown ident " + name;
             var g = NearestGarden(cam.transform.position, out float dist);
             if (g == null) return "no garden catcher loaded";
+            if (g.Activator != null && g.Activator.HasAttached())
+            {
+                try { g.Activator.DestroyAttached(); g.Activator.DestroyAttachedModel(); } catch { }
+            }
             var go = g.Plant(t, false);
             if (go != null) FixLemon(go, true);
             return $"plant {t.name} in {DiagX.Path(g.transform)} (d={dist:0.0}) -> {(go != null ? go.name : "null")}";
@@ -1064,7 +1155,7 @@ namespace ClassicSlimes
         public PhaseLemonTree(IntPtr ptr) : base(ptr) { }
 
         internal SpawnResource Sr;
-        internal readonly HashSet<IntPtr> Handled = new();
+        internal readonly Dictionary<IntPtr, float> ConsumedUntil = new();
         internal readonly List<Foods.PhaseLemon> Lemons = new();
         internal float NextScan;
         bool _warned;
@@ -1086,7 +1177,5 @@ namespace ClassicSlimes
             try { Foods.PhaseTick(this); }
             catch (Exception e) { if (!_warned) { _warned = true; ClassicSlimesMod.Log.Warning("phase lemon tick: " + e); } }
         }
-
-        void LateUpdate() => Handled.Clear();
     }
 }

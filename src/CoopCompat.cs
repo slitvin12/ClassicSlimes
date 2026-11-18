@@ -268,6 +268,19 @@ namespace ClassicSlimes
             }
         }
 
+        /// <summary>Destroys the swapped fruit on Phase Lemon trigger, marking its ResourceCycle state ROTTEN first to block duplicate triggers across network frames.</summary>
+        public static void DestroyPhaseFruit(GameObject go)
+        {
+            if (go == null) return;
+            try
+            {
+                var rc = go.GetComponent<ResourceCycle>();
+                if (rc != null && rc._model != null) rc._model.state = ResourceCycle.State.ROTTEN;
+            }
+            catch { }
+            DestroySharedActor(go, "ClassicSlimes.LemonPhasor", false);
+        }
+
         /// <summary>True when held by the local player's vacpack (prevents remote ReplicaMotion.SetHeld from triggering Glitch debug rewards/despawn).</summary>
         public static bool IsHeldByLocalVac(Vacuumable vac)
         {

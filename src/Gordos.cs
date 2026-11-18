@@ -87,7 +87,22 @@ namespace ClassicSlimes
             foreach (var n in Slimes)
             {
                 var s = SlimeFactory.Spec(n);
-                if (s?.Def == null) continue;
+                if (s?.Def == null)
+                {
+                    // Even when a slime is disabled in config, register a load-only gordo type ID so saved GordoV01 records resolve cleanly.
+                    try
+                    {
+                        if (!Types.ContainsKey(n))
+                        {
+                            string key = n.ToLowerInvariant();
+                            var stubIcon = Res.Sprite("iconGordo" + n) ?? pink.icon;
+                            Types[n] = Library.CreateGordoType("Classic" + n, stubIcon, Library.CreateLocalizedString("l." + key + "_gordo"),
+                                "IdentifiableType.Classic" + n + "Gordo");
+                        }
+                    }
+                    catch { }
+                    continue;
+                }
                 try { Create(s, pink); }
                 catch (Exception e) { Log.Error($"Creating the {n} gordo failed: {e}"); }
             }

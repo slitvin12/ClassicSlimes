@@ -21,6 +21,10 @@ namespace ClassicSlimes
     {
         static readonly Dictionary<IntPtr, Sprite> Art = new();
         static readonly Dictionary<IntPtr, Sprite> PlortArt = new();   // small secondary picture (the plort) on the slime page
+        public static readonly Dictionary<IntPtr, RadiantSlimePediaEntry> RadiantBySlime = new();
+        public static readonly Dictionary<IntPtr, Sprite> RadiantCardSprites = new();
+        static readonly Dictionary<IntPtr, PediaEntry> RadiantScreenEntry = new();
+        static readonly HashSet<IntPtr> LoggedRadCard = new();
         // every icon view that currently shows one of our entries (the details page has several of them, e.g. the
         // default and the slime icon highlights; only one is visible) - re-applied every frame while it is active
         static readonly Dictionary<IntPtr, PediaEntryIconAndHighlights> Views = new();
@@ -32,6 +36,8 @@ namespace ClassicSlimes
         static readonly Dictionary<string, Sprite> GameSprites = new();
         static readonly Dictionary<IntPtr, Sprite> Applied = new();                  // image -> sprite we last wrote
         static readonly Dictionary<IntPtr, Sprite> Original = new();                 // image -> sprite it had before we first changed it
+        static readonly Dictionary<IntPtr, (Vector2 cell, Vector2 spacing)> OrigGridLayout = new();
+        static readonly Dictionary<IntPtr, (Vector2 pos, float stepX, float stepY, int cols)> OrigManualGrid = new();
         static bool _err;
 
         public static void Register(IdentifiableType ident, Sprite art)
@@ -53,6 +59,213 @@ namespace ClassicSlimes
             Original.Clear();
             GameSprites.Clear();
             Logged.Clear();
+            RadiantScreenEntry.Clear();
+            LoggedRadCard.Clear();
+            OrigGridLayout.Clear();
+            OrigManualGrid.Clear();
+        }
+
+        public static void RegisterRadiant(IdentifiableType slime, RadiantSlimePediaEntry entry, Sprite cardArt)
+        {
+            if (slime == null || entry == null) return;
+            RadiantBySlime[slime.Pointer] = entry;
+            if (cardArt != null) RadiantCardSprites[entry.Pointer] = cardArt;
+        }
+
+        internal static void EnsureRadiantScreen(PediaRadiantSlimeScreen scr)
+        {
+            if (scr == null) return;
+            var rt = scr._category?.TryCast<PediaRuntimeCategory>();
+            var items = rt?._items;
+            RadiantLooks.EnsureRadiantEntriesInRuntimeList(items);
+            if (items == null || scr._buttons == null || scr._buttons.Length == 0) return;
+
+            if (scr._buttons.Length < items.Count)
+            {
+                int origLen = scr._buttons.Length;
+                var tpl = scr._buttons[origLen - 1];
+                var parent = scr._buttons[0].transform.parent?.TryCast<RectTransform>();
+                if (tpl != null && parent != null)
+                {
+                    var list = new List<PediaEntryIconButton>(items.Count);
+                    for (int i = 0; i < origLen; i++) list.Add(scr._buttons[i]);
+                    for (int i = origLen; i < items.Count; i++)
+                    {
+                        var cloneGo = UnityEngine.Object.Instantiate(tpl.gameObject, parent, false);
+                        cloneGo.name = tpl.gameObject.name + "_Classic_" + i;
+                        cloneGo.SetActive(true);
+                        var nb = cloneGo.GetComponent<PediaEntryIconButton>();
+                        list.Add(nb);
+                    }
+                    scr._buttons = Gc.Array(list);
+
+                    var glg = parent.GetComponent<GridLayoutGroup>();
+                    if (glg != null)
+                    {
+                        if (!OrigGridLayout.TryGetValue(glg.Pointer, out var orig))
+                        {
+                            orig = (glg.cellSize, glg.spacing);
+                            OrigGridLayout[glg.Pointer] = orig;
+                        }
+                        int cols = glg.constraint == GridLayoutGroup.Constraint.FixedColumnCount && glg.constraintCount > 0
+                            ? glg.constraintCount : 6;
+                        int rows = (items.Count + cols - 1) / cols;
+                        int origRows = (origLen + cols - 1) / cols;
+                        if (rows > origRows)
+                        {
+                            glg.cellSize = orig.cell * 0.82f;
+                            glg.spacing = orig.spacing * 0.78f;
+                        }
+                    }
+                    else
+                    {
+                        if (!OrigManualGrid.TryGetValue(parent.Pointer, out var mg))
+                        {
+                            var pos0 = list[0]?.GetComponent<RectTransform>()?.anchoredPosition ?? Vector2.zero;
+                            float x0 = pos0.x, y0 = pos0.y, stepX = 0f, stepY = 0f;
+                            int cols = 1;
+                            for (int i = 1; i < origLen; i++)
+                            {
+                                var rtB = list[i]?.GetComponent<RectTransform>();
+                                if (rtB == null) continue;
+                                var p = rtB.anchoredPosition;
+                                if (Mathf.Abs(p.y - y0) < 4f)
+                                {
+                                    cols++;
+                                    if (stepX == 0f && Mathf.Abs(p.x - x0) > 4f) stepX = p.x - x0;
+                                }
+                                else if (stepY == 0f)
+                                {
+                                    stepY = p.y - y0;
+                                }
+                            }
+                            mg = (pos0, stepX, stepY, cols);
+                            OrigManualGrid[parent.Pointer] = mg;
+                        }
+                        if (mg.cols > 1 && mg.stepX != 0f && mg.stepY != 0f)
+                        {
+                            int rows = (items.Count + mg.cols - 1) / mg.cols;
+                            int origRows = (origLen + mg.cols - 1) / mg.cols;
+                            float scale = rows > origRows ? Mathf.Clamp((float)origRows / rows, 0.80f, 0.92f) : 1f;
+                            float useStepY = mg.stepY * scale;
+                            for (int i = 0; i < list.Count; i++)
+                            {
+                                var rtB = list[i]?.GetComponent<RectTransform>();
+                                if (rtB == null) continue;
+                                int r = i / mg.cols, c = i % mg.cols;
+                                rtB.anchoredPosition = new Vector2(mg.pos.x + c * mg.stepX, mg.pos.y + r * useStepY);
+                                if (rows > origRows) rtB.localScale = Vector3.one * scale;
+                            }
+                        }
+                    }
+
+                    for (int i = origLen; i < list.Count; i++)
+                    {
+                        var nb = list[i];
+                        if (nb == null) continue;
+                        try { nb.BindItem(i, items[i]); }
+                        catch { try { nb.SetData(items[i]); } catch { } }
+                        try { scr._SetCategory_b__22_0(nb, items[i]); } catch { }
+                        try { nb.SetState(false, false); } catch { }
+                    }
+                    try { UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(parent); } catch { }
+                    if (Diag.Enabled) ClassicSlimesMod.Log.Msg($"[pedia-rad] expanded Radiant grid buttons {origLen} -> {list.Count} (glg={glg != null})");
+                }
+            }
+
+            if (scr._buttons != null)
+            {
+                for (int i = 0; i < scr._buttons.Length; i++)
+                {
+                    var b = scr._buttons[i];
+                    if (b == null) continue;
+                    if (b.PointerSelected == null)
+                        b.PointerSelected = new Action<PediaEntryIconButton>(btn => scr.OnPointerSelectedButton(btn));
+                    if (b.PointerDeselected == null)
+                        b.PointerDeselected = new Action<PediaEntryIconButton>(btn => scr.OnPointerDeselectedButton(btn));
+                    if (b.PointerClicked == null)
+                        b.PointerClicked = new Action<PediaEntryIconButton>(btn => scr.OnPointerClickedButton(btn));
+                }
+            }
+
+            if (scr._gridNavigation != null)
+            {
+                int navCount = Mathf.Min(items.Count, scr._buttons.Length);
+                int cols = Mathf.Max(1, scr._gridNavigation.NumColumns);
+                int rows = (navCount + cols - 1) / cols;
+                if (scr._gridNavigation.NumRows < rows || scr._gridNavigation._totalCount != navCount)
+                {
+                    int sel = scr._gridNavigation.SelectedIndex;
+                    scr._gridNavigation.Resize(rows, cols);
+                    scr._gridNavigation.SetItemCount(navCount);
+                    if (sel >= 0 && sel < navCount) scr._gridNavigation.SetSelectedIndex(sel);
+                }
+            }
+            if (scr._hoverIndex >= scr._buttons.Length) scr._hoverIndex = -1;
+            if (scr._previousSelectedIndex >= scr._buttons.Length) scr._previousSelectedIndex = -1;
+        }
+
+        internal static void ShownRadiant(PediaRadiantSlimeScreen scr, PediaEntry entry)
+        {
+            if (scr == null) return;
+            RadiantScreenEntry[scr.Pointer] = entry;
+            ApplyRadiantCard(scr, entry);
+        }
+
+        internal static void TickRadiantScreen(PediaRadiantSlimeScreen scr)
+        {
+            if (scr == null || !RadiantScreenEntry.TryGetValue(scr.Pointer, out var entry)) return;
+            if (entry != null && RadiantCardSprites.ContainsKey(entry.Pointer)) ApplyRadiantCard(scr, entry);
+        }
+
+        static void ApplyRadiantCard(PediaRadiantSlimeScreen scr, PediaEntry entry)
+        {
+            if (scr?._cardImages == null) return;
+            bool ours = false;
+            Sprite sp = null;
+            if (entry != null && RadiantCardSprites.TryGetValue(entry.Pointer, out sp) && sp != null)
+            {
+                try { ours = SceneContext.Instance?.PediaDirector?.IsUnlocked(entry) == true; } catch { }
+            }
+            if (Diag.Enabled && entry != null && RadiantCardSprites.ContainsKey(entry.Pointer) && LoggedRadCard.Add(entry.Pointer))
+            {
+                var names = new List<string>();
+                foreach (var im in scr._cardImages)
+                    if (im != null) names.Add($"{im.name}({(im.sprite != null ? im.sprite.name : "-")})");
+                ClassicSlimesMod.Log.Msg($"[pedia-rad] card {entry.name} unlocked={ours} cardImages=[{string.Join(", ", names)}]");
+            }
+            if (!ours)
+            {
+                foreach (var im in scr._cardImages)
+                {
+                    if (im == null || !Applied.TryGetValue(im.Pointer, out var prevOurs)) continue;
+                    Applied.Remove(im.Pointer);
+                    try
+                    {
+                        if (im.overrideSprite != null && im.overrideSprite.Pointer == prevOurs.Pointer) im.overrideSprite = null;
+                        if (Original.TryGetValue(im.Pointer, out var orig) && im.sprite != null && im.sprite.Pointer == prevOurs.Pointer)
+                            if ((object)orig == null || orig != null) im.sprite = orig;
+                    }
+                    catch { }
+                }
+                return;
+            }
+            foreach (var im in scr._cardImages)
+            {
+                if (im == null) continue;
+                if (im.sprite == null || im.sprite.Pointer != sp.Pointer || im.overrideSprite == null || im.overrideSprite.Pointer != sp.Pointer)
+                {
+                    Keep(im);
+                    im.sprite = sp;
+                    im.overrideSprite = sp;
+                    Applied[im.Pointer] = sp;
+                }
+                im.preserveAspect = true;
+                if (!im.enabled) im.enabled = true;
+                var c = im.color;
+                bool isShadow = im.name != null && im.name.IndexOf("Shadow", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (!isShadow && c.a < 1f) im.color = new Color(c.r, c.g, c.b, 1f);
+            }
         }
 
         public static void RegisterPersistence(SaveReferenceTranslation srt = null)
@@ -76,6 +289,17 @@ namespace ClassicSlimes
                     {
                         string nm = pe.name;
                         if (!string.IsNullOrEmpty(nm) && !lookup.ContainsKey(nm)) { lookup[nm] = pe; added++; }
+                        if (!string.IsNullOrEmpty(nm) && !nm.Contains('.') && nm.EndsWith("_slime", StringComparison.Ordinal))
+                        {
+                            string k = "Pink." + nm;
+                            if (!lookup.ContainsKey(k)) { lookup[k] = pe; added++; }
+                        }
+                        if (!string.IsNullOrEmpty(nm) && !nm.Contains('.') && (nm.EndsWith("_veggie", StringComparison.Ordinal) || nm.EndsWith("_fruit", StringComparison.Ordinal)))
+                        {
+                            string pfx = nm.EndsWith("_veggie", StringComparison.Ordinal) ? "CarrotVeggie." : "PogoFruit.";
+                            string k = pfx + nm;
+                            if (!lookup.ContainsKey(k)) { lookup[k] = pe; added++; }
+                        }
                     }
                     catch { }
                 }
@@ -302,6 +526,77 @@ namespace ClassicSlimes
         static void Prefix(AutoSaveDirector __instance)
         {
             try { if (__instance != null) PediaArt.RegisterPersistence(__instance._saveReferenceTranslation); }
+            catch { }
+        }
+    }
+
+    [HarmonyPatch(typeof(SaveReferenceTranslation), nameof(SaveReferenceTranslation.OnPediaEntryListChanged))]
+    static class PediaEntryListChangedPatch
+    {
+        static void Postfix(SaveReferenceTranslation __instance) => PediaArt.RegisterPersistence(__instance);
+    }
+
+    [HarmonyPatch(typeof(GameModelPushHelpers), nameof(GameModelPushHelpers.PushPedia))]
+    static class PushPediaPersistencePatch
+    {
+        static void Prefix() => PediaArt.RegisterPersistence();
+    }
+
+    [HarmonyPatch(typeof(PediaRadiantSlimeScreen))]
+    static class PediaRadiantScreenPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(PediaRadiantSlimeScreen.BeforeFadeIn))]
+        static void BeforeFadeInPrefix(PediaRadiantSlimeScreen __instance)
+        {
+            try { PediaArt.EnsureRadiantScreen(__instance); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("PediaRadiant BeforeFadeIn: " + e.Message); }
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(PediaRadiantSlimeScreen.ViewEntry))]
+        static void ViewEntryPrefix(PediaRadiantSlimeScreen __instance)
+        {
+            try { PediaArt.EnsureRadiantScreen(__instance); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("PediaRadiant ViewEntry prefix: " + e.Message); }
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch(nameof(PediaRadiantSlimeScreen.ViewEntry))]
+        static void ViewEntryPostfix(PediaRadiantSlimeScreen __instance, PediaEntry entry)
+        {
+            try { PediaArt.ShownRadiant(__instance, entry); }
+            catch (Exception e) { ClassicSlimesMod.Log.Warning("PediaRadiant ViewEntry: " + e.Message); }
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch("Update")]
+        static void UpdatePrefix(PediaRadiantSlimeScreen __instance)
+        {
+            try { PediaArt.EnsureRadiantScreen(__instance); }
+            catch { }
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch("Update")]
+        static void UpdatePostfix(PediaRadiantSlimeScreen __instance)
+        {
+            try { PediaArt.TickRadiantScreen(__instance); }
+            catch { }
+        }
+    }
+
+    [HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirector), nameof(Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirector.UnlockRadiantPediaEntry))]
+    static class UnlockRadiantPediaPatch
+    {
+        static void Postfix(IdentifiableType radiantBaseType)
+        {
+            try
+            {
+                if (radiantBaseType == null || !PediaArt.RadiantBySlime.TryGetValue(radiantBaseType.Pointer, out var re) || re == null) return;
+                var pd = SceneContext.Instance?.PediaDirector;
+                if (pd != null && !pd.IsUnlocked(re)) pd.Unlock(re, true);
+            }
             catch { }
         }
     }

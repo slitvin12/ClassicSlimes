@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -8,7 +9,9 @@ using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppMonomiPark.SlimeRancher.Slime.SquashWobble;
 using Il2CppMonomiPark.SlimeRancher.Player;
 using Il2CppMonomiPark.SlimeRancher.Player.CharacterController;
+using Il2CppMonomiPark.SlimeRancher.Player.PlayerItems;
 using Il2CppMonomiPark.SlimeRancher.SceneManagement;
+using MelonLoader;
 using UnityEngine;
 
 namespace ClassicSlimes
@@ -165,6 +168,11 @@ namespace ClassicSlimes
                 case "pediaimgs": L(PediaArt.Dump()); break;   // visible images of the open slimepedia -> pediaimgs.txt
                 case "lemontree": L(Foods.LemonTree(a.Length > 1 ? a[1] : "")); break;   // lemontree [ripen|hit]: nearest lemon tree, phasing lemons
                 case "plant": L(Foods.DevPlant(a.Length > 1 ? a[1] : "LemonFruit")); break;   // plant [ident]: plant into the nearest garden
+                case "vactest": MelonCoroutines.Start(VacTestCo(a)); break;   // vactest [ident] [radiant] [charged]: real vacpack capture & expel test
+                case "lemontest": MelonCoroutines.Start(LemonTestCo()); break;   // lemontest: real Phase Lemon tree intangibility + Launched swap test
+                case "pediatest": L(PediaTest(a.Length > 1 ? a[1] : "check")); break;   // pediatest [unlock|check]: unlock & verify Slimepedia persistence
+                case "ammotest": L(AmmoTest(a.Length > 1 ? a[1] : "check")); break;   // ammotest [fill|check]: verify modded items & radiant slimes survive save/reload in ammo slots
+                case "loadsave": LoadSaveCmd(a.Length > 1 ? a[1] : "20261020001829_6"); break;   // loadsave [gameName]: safely load dedicated test save 20261020001829_6
                 case "matinfo": MatInfo(a[1]); break;
                 case "facedump":
                     {
@@ -195,6 +203,8 @@ namespace ClassicSlimes
                     SceneContext.Instance.PlayerState.AddRads(F(a, 1, 50f));
                     break;
                 case "pedia": Pedia(a.Length > 1 ? a[1] : "Rad"); break;
+                case "pediarad": PediaRad(a.Length > 1 ? a[1] : "Mosaic"); break;   // pediarad [slime]: open native Radiant Slimepedia screen for a classic radiant slime
+                case "qsshow": MelonCoroutines.Start(QsShowCo()); break;
                 case "texst":
                     foreach (var m in Tune(a[1]))
                     {
@@ -605,6 +615,22 @@ namespace ClassicSlimes
             L($"pedia {name}: entry={e.name} art={(PediaArt.For(e) != null ? "ours" : "none")}");
         }
 
+        static void PediaRad(string name)
+        {
+            var spec = SlimeFactory.Spec(name);
+            if (spec?.Def == null) { L("no slime " + name); return; }
+            var pd = SceneContext.Instance?.PediaDirector;
+            if (pd == null) { L("no PediaDirector"); return; }
+            RadiantLooks.EnsureRadiantPediaCategory();
+            if (!PediaArt.RadiantBySlime.TryGetValue(spec.Def.Pointer, out var re) || re == null)
+            { L("no radiant pedia entry for " + name); return; }
+            pd.Unlock(re, false);
+            L($"pediarad {name}: entry={re.name} pid={re.PersistenceId} unlocked={pd.IsUnlocked(re)}");
+            foreach (var scr in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.UI.Pedia.PediaRadiantSlimeScreen>())
+                if (scr != null && scr.gameObject.activeInHierarchy) { scr.ViewEntry(re); return; }
+            pd.ShowPedia(re, Il2CppMonomiPark.SlimeRancher.Analytics.Event.PediaOpenedAnalyticsEvent.Opener.DEBUG_MENU, null);
+        }
+
         static void Palettes()
         {
             string c(Color x) => $"({x.r:0.00},{x.g:0.00},{x.b:0.00})";
@@ -974,6 +1000,502 @@ namespace ClassicSlimes
                 if (g == null) break;
                 g.name = "x"; UnityEngine.Object.Destroy(g);
             }
+        }
+
+        static IdentifiableType FindIdentByName(string name)
+        {
+            foreach (var x in Resources.FindObjectsOfTypeAll<IdentifiableType>())
+                if (x != null && string.Equals(x.name, name, StringComparison.OrdinalIgnoreCase)) return x;
+            return null;
+        }
+
+        static void AimPlayerAt(Vector3 target)
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            var d = target - cam.transform.position;
+            float horiz = new Vector2(d.x, d.z).magnitude;
+            float yaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+            float pitch = -Mathf.Atan2(d.y, Mathf.Max(0.01f, horiz)) * Mathf.Rad2Deg;
+            foreach (var cc in UnityEngine.Object.FindObjectsOfType<SRCharacterController>())
+                if (cc != null) cc.Rotation = Quaternion.Euler(0f, yaw, 0f);
+            foreach (var fc in UnityEngine.Object.FindObjectsOfType<Il2CppMonomiPark.KFC.FirstPerson.FirstPersonCameraController>())
+                if (fc != null) fc.SetRotation(Quaternion.Euler(pitch, yaw, 0f));
+        }
+
+        static IEnumerator VacTestCo(string[] a)
+        {
+            string identName = "Quicksilver";
+            bool wantRadiant = false, wantCharged = false;
+            for (int i = 1; i < a.Length; i++)
+            {
+                if (string.Equals(a[i], "radiant", StringComparison.OrdinalIgnoreCase)) wantRadiant = true;
+                else if (string.Equals(a[i], "charged", StringComparison.OrdinalIgnoreCase)) wantCharged = true;
+                else identName = a[i];
+            }
+            var t = FindIdentByName(identName);
+            var ps = SceneContext.Instance?.PlayerState;
+            var vi = ps?.VacuumItem;
+            var ammo = ps?.Ammo;
+            var cam = Camera.main;
+            if (t == null || t.prefab == null || ps == null || vi == null || ammo == null || cam == null)
+            {
+                L($"[vactest] FAIL setup ident={(t != null)} ps={(ps != null)} vi={(vi != null)} ammo={(ammo != null)}");
+                yield break;
+            }
+            DevSpawn.Cmd(new[] { "spawnslime", "clear" });
+            int slot = 3;
+            int slotCount = ammo.Slots != null ? ammo.Slots.Length : 4;
+            ammo.Clear(slot);
+            ammo.SetSelectedSlot(slot);
+            var beforeCnt = new int[slotCount];
+            for (int s = 0; s < slotCount; s++) beforeCnt[s] = ammo.GetSlotCount(s);
+            int capturedSlot = slot;
+
+            var fwd = cam.transform.forward; fwd.y = 0f;
+            fwd = fwd.sqrMagnitude > 1e-6f ? fwd.normalized : Vector3.forward;
+            var spawnPos = cam.transform.position + fwd * 3.5f;
+            if (Physics.Raycast(spawnPos + Vector3.up * 3f, Vector3.down, out var gHit, 20f, U.GroundMask, QueryTriggerInteraction.Ignore))
+                spawnPos = gHit.point + Vector3.up * 0.55f;
+
+            var slimeGo = Foods.SpawnActor(t, spawnPos, Quaternion.LookRotation(-fwd, Vector3.up));
+            if (slimeGo == null)
+            {
+                L($"[vactest] FAIL SpawnActor({t.name}) returned null");
+                yield break;
+            }
+            if (wantRadiant)
+            {
+                var sr = slimeGo.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeRadiant>();
+                var sd = t.TryCast<SlimeDefinition>();
+                if (sr != null)
+                {
+                    if (sd != null && !sd.IsLargo) sr.SetRadiant(sd);
+                    else sr.SetRadiant();
+                }
+            }
+            var qs = slimeGo.GetComponent<QuicksilverSlime>();
+            if (wantCharged && qs != null) qs.Overcharge(15f);
+
+            var srcc = UnityEngine.Object.FindObjectOfType<SRCharacterController>();
+            float startT = Time.time;
+            float nextLog = 0f;
+            bool captured = false;
+            L($"[vactest] START {t.name} radiant={wantRadiant} charged={wantCharged} slot={slot} spawnDist={Vector3.Distance(cam.transform.position, slimeGo.transform.position):0.0}m");
+
+            while (Time.time - startT < 5.5f)
+            {
+                vi._vacPressed = true;
+                if (vi._vacMode != VacuumItem.VacMode.VAC) vi.SetVacMode(VacuumItem.VacMode.VAC);
+                if (slimeGo == null)
+                {
+                    for (int s = 0; s < slotCount; s++)
+                        if (ammo.GetSlotCount(s) > beforeCnt[s] && ammo.GetSlotName(s) == t) { capturedSlot = s; captured = true; break; }
+                    if (captured) break;
+                    yield return null;
+                    continue;
+                }
+                var targetPt = slimeGo.transform.position + Vector3.up * 0.45f;
+                AimPlayerAt(targetPt);
+
+                if (srcc != null)
+                {
+                    var dXZ = targetPt - srcc.Position; dXZ.y = 0f;
+                    float distXZ = dXZ.magnitude;
+                    if (distXZ > 3.0f && distXZ < 22f)
+                    {
+                        var stepPos = srcc.Position + (dXZ / distXZ) * (6.8f * Time.deltaTime);
+                        if (Physics.Raycast(stepPos + Vector3.up * 2.5f, Vector3.down, out var pHit, 8f, U.GroundMask, QueryTriggerInteraction.Ignore))
+                            stepPos.y = pHit.point.y + 0.02f;
+                        else
+                            stepPos.y = srcc.Position.y;
+                        srcc.Position = stepPos;
+                    }
+                }
+
+                if (Time.time >= nextLog)
+                {
+                    nextLog = Time.time + 0.25f;
+                    var vac = slimeGo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
+                    bool inTrk = false;
+                    try { inTrk = vi._tracker?._gameObjSet != null && vi._tracker._gameObjSet.Contains(slimeGo); } catch { }
+                    float dCam = Vector3.Distance(cam.transform.position, slimeGo.transform.position);
+                    L($"[vactest] t={Time.time - startT:0.00}s d={dCam:0.0}m trk={inTrk} vacCaptive={vac?.IsCaptive()} qsCaptive={qs?.IsVacCaptured()} count={ammo.GetSlotCount(slot)} {(qs != null ? qs.DevInfo() : "")}");
+                }
+                for (int s = 0; s < slotCount; s++)
+                    if (ammo.GetSlotCount(s) > beforeCnt[s] && ammo.GetSlotName(s) == t) { capturedSlot = s; captured = true; break; }
+                if (captured) break;
+                yield return null;
+            }
+
+            vi._vacPressed = false;
+            vi.SetVacMode(VacuumItem.VacMode.NONE);
+            yield return null;
+            if (!captured)
+                for (int s = 0; s < slotCount; s++)
+                    if (ammo.GetSlotCount(s) > beforeCnt[s] && ammo.GetSlotName(s) == t) { capturedSlot = s; break; }
+            int cnt = ammo.GetSlotCount(capturedSlot);
+            var stored = ammo.GetSlotName(capturedSlot);
+            if (!captured && cnt > beforeCnt[capturedSlot] && slimeGo == null) captured = true;
+
+            bool expelledOk = false;
+            bool radiantKept = !wantRadiant;
+            if (captured && stored == t)
+            {
+                ammo.SetSelectedSlot(capturedSlot);
+                vi.Expel(0f);
+                yield return new WaitForSeconds(0.25f);
+                int afterCnt = ammo.GetSlotCount(capturedSlot);
+                GameObject foundExpelled = null;
+                foreach (var ia in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+                {
+                    if (ia == null || ia.identType != t) continue;
+                    if (Vector3.Distance(cam.transform.position, ia.transform.position) < 20f)
+                    {
+                        foundExpelled = ia.gameObject;
+                        if (wantRadiant)
+                        {
+                            var sr = ia.GetComponent<Il2CppMonomiPark.SlimeRancher.Slime.SlimeRadiant>();
+                            radiantKept = sr != null && sr.IsRadiant;
+                        }
+                        Destroyer.DestroyActor(ia.gameObject, "ClassicSlimes.VacTestCleanup", true);
+                    }
+                }
+                expelledOk = afterCnt == beforeCnt[capturedSlot] && foundExpelled != null && radiantKept;
+            }
+            if (slimeGo != null) Destroyer.DestroyActor(slimeGo, "ClassicSlimes.VacTestCleanup", true);
+            ammo.Clear(slot);
+            ammo.SetSelectedSlot(slot);
+
+            bool pass = captured && stored == t && expelledOk;
+            L($"[vactest] {(pass ? "PASS" : "FAIL")} {t.name}(rad={wantRadiant},chg={wantCharged}) captured={captured} slot{capturedSlot}={cnt}({(stored != null ? stored.name : "null")}) expelled={expelledOk} radKept={radiantKept} in {Time.time - startT:0.00}s");
+        }
+
+        static IEnumerator QsShowCo()
+        {
+            var t = FindIdentByName("Quicksilver");
+            var cam = Camera.main;
+            if (t == null || cam == null) { L("[qsshow] FAIL missing Quicksilver or Camera"); yield break; }
+            var openFwd = cam.transform.forward; openFwd.y = 0f;
+            openFwd = openFwd.sqrMagnitude > 1e-6f ? openFwd.normalized : Vector3.forward;
+            float bestDist = -1f;
+            for (int i = 0; i < 16; i++)
+            {
+                float ang = i * 22.5f * Mathf.Deg2Rad;
+                var dir = new Vector3(Mathf.Sin(ang), 0f, Mathf.Cos(ang));
+                float d = 16f;
+                if (Physics.SphereCast(cam.transform.position, 0.6f, dir, out var sh, 16f, ~0, QueryTriggerInteraction.Ignore))
+                    d = sh.distance;
+                if (d > bestDist) { bestDist = d; openFwd = dir; }
+            }
+            var openRight = Vector3.Cross(Vector3.up, openFwd).normalized;
+            var pos = cam.transform.position + openFwd * 5.2f - openRight * 2.0f;
+            if (Physics.Raycast(pos + Vector3.up * 5f, Vector3.down, out var hit, 25f, U.GroundMask, QueryTriggerInteraction.Ignore))
+                pos = hit.point + Vector3.up * 0.4f;
+            var go = Foods.SpawnActor(t, pos, Quaternion.LookRotation(openRight, Vector3.up));
+            if (go == null) { L("[qsshow] FAIL SpawnActor null"); yield break; }
+            var qs = go.GetComponent<QuicksilverSlime>();
+            var rb = go.GetComponent<Rigidbody>();
+            if (qs != null) qs.Overcharge(6f);
+            if (rb != null) rb.velocity = openRight * 11f;
+            float t0 = Time.time, nextLog = 0f;
+            L($"[qsshow] START pos={pos} clearDist={bestDist:0.1}m");
+            while (Time.time - t0 < 1.5f && go != null)
+            {
+                AimPlayerAt(go.transform.position - openRight * 0.6f + Vector3.up * 0.25f);
+                if (Time.time >= nextLog && qs != null)
+                {
+                    nextLog = Time.time + 0.25f;
+                    L($"[qsshow] t={Time.time - t0:0.00}s {qs.DevInfo()}");
+                }
+                yield return null;
+            }
+        }
+
+        static IEnumerator LemonTestCo()
+        {
+            var cam = Camera.main;
+            PhaseLemonTree tree = null;
+            float bd = 35f * 35f;
+            foreach (var pt in UnityEngine.Object.FindObjectsOfType<PhaseLemonTree>())
+            {
+                if (pt == null || pt.Sr == null || pt.Sr.SpawnJoints == null) continue;
+                bool hasFruits = false;
+                foreach (var j in pt.Sr.SpawnJoints)
+                    if (j != null && j.connectedBody != null) { hasFruits = true; break; }
+                if (!hasFruits) continue;
+                float dd = cam != null ? (pt.transform.position - cam.transform.position).sqrMagnitude : 0f;
+                if (dd < bd) { bd = dd; tree = pt; }
+            }
+            if (tree == null)
+            {
+                string plantRes = Foods.DevPlant("LemonFruit");
+                L("[lemontest] " + plantRes);
+                yield return new WaitForSeconds(1.8f);
+                bd = float.MaxValue;
+                foreach (var pt in UnityEngine.Object.FindObjectsOfType<PhaseLemonTree>())
+                {
+                    if (pt == null || pt.Sr == null) continue;
+                    float dd = cam != null ? (pt.transform.position - cam.transform.position).sqrMagnitude : 0f;
+                    if (dd < bd) { bd = dd; tree = pt; }
+                }
+                if (tree != null && tree.Sr != null && tree.Sr.SpawnJoints != null)
+                {
+                    bool anyBody = false;
+                    foreach (var j in tree.Sr.SpawnJoints)
+                        if (j != null && j.connectedBody != null) { anyBody = true; break; }
+                    if (!anyBody)
+                    {
+                        try { tree.Sr.Spawn(new SpawnResource.SpawnRequest { SpawnRipe = true }); }
+                        catch (Exception ex) { L("[lemontest] spawn warn: " + ex.Message); }
+                        yield return new WaitForSeconds(0.5f);
+                    }
+                }
+            }
+            if (tree == null)
+            {
+                L("[lemontest] FAIL no PhaseLemonTree found");
+                yield break;
+            }
+            string ripenRes = Foods.LemonTree("ripen");
+            L("[lemontest] " + ripenRes);
+            yield return new WaitForSeconds(0.6f);
+
+            var col = tree.GetComponent<Collider>();
+            int layer = tree.gameObject.layer;
+            int mask = 0;
+            try { mask = Layers.GetLayersCollidedWith(layer).value; } catch { }
+            bool hitsActor = (mask & (1 << Layers.Actor)) != 0;
+            bool hitsLaunched = (mask & (1 << Layers.Launched)) != 0;
+
+            int ripeCount = 0, nonTriggerCount = 0;
+            Vector3 sampleJointPos = tree.transform.position;
+            if (tree.Sr.SpawnJoints != null)
+            {
+                foreach (var j in tree.Sr.SpawnJoints)
+                {
+                    var rb = j != null ? j.connectedBody : null;
+                    if (rb == null) continue;
+                    var rc = rb.GetComponent<ResourceCycle>();
+                    bool isRipe = false;
+                    try { isRipe = rc != null && rc.GetState() == ResourceCycle.State.RIPE; } catch { }
+                    if (!isRipe) continue;
+                    ripeCount++;
+                    sampleJointPos = rb.transform.position;
+                    foreach (var c in rb.GetComponents<Collider>())
+                        if (c != null && !c.isTrigger) nonTriggerCount++;
+                }
+            }
+            L($"[lemontest] col={col?.GetIl2CppType().Name} minY={(col != null ? col.bounds.min.y : -1f):0.00} layer={layer} actorBit={hitsActor} launchedBit={hitsLaunched} ripe={ripeCount} nonTrig={nonTriggerCount}");
+
+            int hits0 = Foods.PhaseHits;
+            var carrotType = FindIdentByName("CarrotVeggie");
+            var pogoType = FindIdentByName("PogoFruit");
+            var lemonType = FindIdentByName("LemonFruit");
+            var carrot = carrotType != null ? Foods.SpawnActor(carrotType, sampleJointPos, Quaternion.identity) : null;
+            var rottenPogo = pogoType != null ? Foods.SpawnActor(pogoType, sampleJointPos, Quaternion.identity) : null;
+            if (rottenPogo != null)
+            {
+                var rrc = rottenPogo.GetComponent<ResourceCycle>();
+                if (rrc != null && rrc._model != null) rrc._model.state = ResourceCycle.State.ROTTEN;
+            }
+            yield return new WaitForSeconds(0.35f);
+            bool falseTriggerClean = Foods.PhaseHits == hits0;
+            if (carrot != null) Destroyer.DestroyActor(carrot, "ClassicSlimes.LemonTestFalse", true);
+            if (rottenPogo != null) Destroyer.DestroyActor(rottenPogo, "ClassicSlimes.LemonTestFalse", true);
+
+            // Held and captive fruits carried in a vacpack must NEVER swap on touch
+            var heldPogo = pogoType != null ? Foods.SpawnActor(pogoType, sampleJointPos, Quaternion.identity) : null;
+            if (heldPogo != null) heldPogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>()?.SetHeld(true);
+            GameObject capAnchor = new GameObject("ClassicSlimesLemonTestJoint");
+            capAnchor.transform.position = sampleJointPos;
+            var anchorRb = capAnchor.AddComponent<Rigidbody>();
+            anchorRb.isKinematic = true;
+            var tmpJoint = capAnchor.AddComponent<FixedJoint>();
+            var capPogo = pogoType != null ? Foods.SpawnActor(pogoType, sampleJointPos, Quaternion.identity) : null;
+            if (capPogo != null) capPogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>()?.SetCaptive(tmpJoint);
+            yield return new WaitForSeconds(0.35f);
+            bool heldClean = Foods.PhaseHits == hits0;
+            if (heldPogo != null)
+            {
+                heldPogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>()?.SetHeld(false);
+                Destroyer.DestroyActor(heldPogo, "ClassicSlimes.LemonTestHeld", true);
+            }
+            if (capPogo != null)
+            {
+                capPogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>()?.SetCaptive(null);
+                Destroyer.DestroyActor(capPogo, "ClassicSlimes.LemonTestCap", true);
+            }
+            UnityEngine.Object.Destroy(capAnchor);
+
+            // Launching a LemonFruit itself into the crown must NOT trigger a swap
+            var dirOut = cam != null ? (cam.transform.position - tree.transform.position) : Vector3.forward;
+            dirOut.y = 0f;
+            dirOut = dirOut.sqrMagnitude > 0.01f ? dirOut.normalized : Vector3.forward;
+            var crownCenter = col != null ? col.bounds.center : tree.transform.position + Vector3.up * 2.8f;
+            var launchStart = crownCenter + dirOut * 3.0f;
+            var selfLemon = lemonType != null ? Foods.SpawnActor(lemonType, launchStart, Quaternion.identity) : null;
+            if (selfLemon != null)
+            {
+                var lVac = selfLemon.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
+                var lRb = selfLemon.GetComponent<Rigidbody>();
+                if (lVac != null) lVac.Launch(Il2CppMonomiPark.SlimeRancher.Vacuumable.LaunchSource.PLAYER);
+                if (lRb != null) lRb.linearVelocity = (crownCenter - launchStart).normalized * 16f;
+            }
+            yield return new WaitForSeconds(0.45f);
+            bool selfLemonClean = Foods.PhaseHits == hits0 && selfLemon != null;
+            if (selfLemon != null) Destroyer.DestroyActor(selfLemon, "ClassicSlimes.LemonTestSelf", true);
+
+            // Real vac-launched fruit test on Layers.Launched -> 1-to-1 swap destroys PogoFruit and ejects edible LemonFruit
+            var pogo = pogoType != null ? Foods.SpawnActor(pogoType, launchStart, Quaternion.identity) : null;
+            int shotLayer = -1;
+            if (pogo != null)
+            {
+                var pVac = pogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
+                var pRb = pogo.GetComponent<Rigidbody>();
+                if (pVac != null) pVac.Launch(Il2CppMonomiPark.SlimeRancher.Vacuumable.LaunchSource.PLAYER);
+                shotLayer = pogo.layer;
+                if (pRb != null) pRb.linearVelocity = (crownCenter - launchStart).normalized * 16f;
+            }
+
+            float waitEnd = Time.time + 0.9f;
+            while (Time.time < waitEnd && pogo != null) yield return null;
+            yield return new WaitForSeconds(0.15f);
+
+            bool pogoDestroyed = pogo == null;
+            if (pogo != null) Destroyer.DestroyActor(pogo, "ClassicSlimes.LemonTestLeftover", true);
+
+            int lemonDrops = 0;
+            bool lemonEdible = false;
+            foreach (var ia in UnityEngine.Object.FindObjectsOfType<IdentifiableActor>())
+            {
+                if (ia == null || ia.identType != lemonType) continue;
+                if (Vector3.Distance(ia.transform.position, tree.Sr.transform.position) > 7f) continue;
+                lemonDrops++;
+                var rc = ia.GetComponent<ResourceCycle>();
+                try { if (rc == null || rc.GetState() == ResourceCycle.State.EDIBLE) lemonEdible = true; } catch { }
+                Destroyer.DestroyActor(ia.gameObject, "ClassicSlimes.LemonTestDrop", true);
+            }
+
+            // Shooting a fruit when 0 ripe lemons remain on the tree must preserve the shot fruit
+            int hitsAfterSwap = Foods.PhaseHits;
+            bool swapped = hitsAfterSwap == hits0 + 1;
+            tree.Sr.DropFromJoints();
+            yield return new WaitForSeconds(0.25f);
+            var emptyPogo = pogoType != null ? Foods.SpawnActor(pogoType, launchStart, Quaternion.identity) : null;
+            if (emptyPogo != null)
+            {
+                var eVac = emptyPogo.GetComponent<Il2CppMonomiPark.SlimeRancher.Vacuumable>();
+                var eRb = emptyPogo.GetComponent<Rigidbody>();
+                if (eVac != null) eVac.Launch(Il2CppMonomiPark.SlimeRancher.Vacuumable.LaunchSource.PLAYER);
+                if (eRb != null) eRb.linearVelocity = (crownCenter - launchStart).normalized * 16f;
+            }
+            yield return new WaitForSeconds(0.45f);
+            bool emptyTreePreservesFruit = Foods.PhaseHits == hitsAfterSwap && emptyPogo != null;
+            if (emptyPogo != null) Destroyer.DestroyActor(emptyPogo, "ClassicSlimes.LemonTestEmpty", true);
+            try { tree.Sr.Spawn(new SpawnResource.SpawnRequest { SpawnRipe = true }); } catch { }
+
+            bool pass = nonTriggerCount == 0 && hitsActor && hitsLaunched && falseTriggerClean && heldClean && selfLemonClean && pogoDestroyed && swapped && lemonDrops >= 1 && lemonEdible && emptyTreePreservesFruit;
+            L($"[lemontest] {(pass ? "PASS" : "FAIL")} nonTrig={nonTriggerCount} bits=({hitsActor},{hitsLaunched}) falseClean={falseTriggerClean} heldClean={heldClean} selfClean={selfLemonClean} shotLayer={shotLayer}/{Layers.Launched} pogoDestroyed={pogoDestroyed} swaps={hitsAfterSwap - hits0} drops={lemonDrops} edible={lemonEdible} emptyKeep={emptyTreePreservesFruit}");
+        }
+
+        static void LoadSaveCmd(string gameName)
+        {
+            if (!string.Equals(gameName, "20261020001829_6", StringComparison.Ordinal))
+            {
+                L($"[loadsave] REFUSED: '{gameName}' is not test save 20261020001829_6");
+                return;
+            }
+            var asd = GameContext.Instance?.AutoSaveDirector;
+            if (asd == null) { L("[loadsave] no AutoSaveDirector"); return; }
+            var saves = asd.GetSavesByGameName(gameName);
+            Il2CppMonomiPark.SlimeRancher.Persist.Summary best = null;
+            if (saves != null)
+                for (int i = 0; i < saves.Count; i++)
+                {
+                    var s = saves[i];
+                    if (s != null && !s.IsInvalid && (best == null || s.SaveNumber > best.SaveNumber)) best = s;
+                }
+            if (best == null) { L("[loadsave] not found: " + gameName); return; }
+            var ms = new Il2CppSystem.IO.MemoryStream();
+            asd._storageProvider.GetGameData(best.SaveName, ms);
+            ms.Seek(0L, Il2CppSystem.IO.SeekOrigin.Begin);
+            L($"[loadsave] loading {best.Name} / {best.SaveName} (#{best.SaveNumber})");
+            asd.BeginLoad(best.SaveIdentifier, ms.Cast<Il2CppSystem.IO.Stream>());
+        }
+
+        static string PediaTest(string mode)
+        {
+            var pd = SceneContext.Instance?.PediaDirector;
+            if (pd == null) return "[pediatest] FAIL no PediaDirector";
+            PediaArt.RegisterPersistence();
+            Foods.EnsurePediaDirectorLinks();
+            var srtLookup = GameContext.Instance?.AutoSaveDirector?._saveReferenceTranslation?._pediaEntryLookup;
+            var targets = new List<IdentifiableType>();
+            foreach (var s in SlimeFactory.Specs) if (s?.Def != null) targets.Add(s.Def);
+            foreach (var f in Foods.All) if (f?.Type != null) targets.Add(f.Type);
+
+            int ok = 0, total = 0;
+            var sb = new System.Text.StringBuilder();
+            foreach (var t in targets)
+            {
+                total++;
+                var e = pd.GetEntry(t);
+                if (e == null) { sb.Append($" | {t.name}:NO_ENTRY"); continue; }
+                if (mode == "unlock" && !pd.IsUnlocked(e)) pd.Unlock(e, false);
+                bool unl = pd.IsUnlocked(e);
+                string pid = "";
+                try { pid = e.PersistenceId ?? ""; } catch { }
+                bool inSrt = srtLookup != null && !string.IsNullOrEmpty(pid) && srtLookup.ContainsKey(pid);
+                if (unl) ok++;
+                sb.Append($" | {t.name}(pid={pid},_id={e._persistenceId},unl={unl},srt={inSrt})");
+            }
+            foreach (var kv in PediaArt.RadiantBySlime)
+            {
+                total++;
+                var re = kv.Value;
+                if (re == null) { sb.Append(" | rad:NULL"); continue; }
+                if (mode == "unlock" && !pd.IsUnlocked(re)) pd.Unlock(re, false);
+                bool unl = pd.IsUnlocked(re);
+                string pid = "";
+                try { pid = re.PersistenceId ?? ""; } catch { }
+                bool inSrt = srtLookup != null && !string.IsNullOrEmpty(pid) && srtLookup.ContainsKey(pid);
+                if (unl) ok++;
+                sb.Append($" | {re.name}(pid={pid},unl={unl},srt={inSrt})");
+            }
+            bool pass = ok == total && total > 0;
+            return $"[pediatest] {(pass ? "PASS" : "FAIL")} ({ok}/{total} unlocked, mode={mode}){sb}";
+        }
+
+        static string AmmoTest(string mode)
+        {
+            var ammo = SceneContext.Instance?.PlayerState?.Ammo;
+            if (ammo == null) return "[ammotest] FAIL no AmmoSlotManager";
+            string[] names = { "Quicksilver", "LemonFruit", "OcaocaVeggie", "ParsnipVeggie" };
+            if (mode == "fill")
+            {
+                for (int i = 0; i < 4; i++) ammo.Clear(i);
+                int added = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    var t = FindIdentByName(names[i]);
+                    if (t == null) continue;
+                    var meta = new Il2CppMonomiPark.SlimeRancher.Player.AmmoSlot.AmmoMetadata(t, default, i == 0);
+                    if (ammo.MaybeAddToSpecificSlot(meta, i, 1, false)) added++;
+                }
+                return $"[ammotest] fill added={added}/4";
+            }
+            int ok = 0;
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < 4; i++)
+            {
+                var cur = ammo.GetSlotName(i);
+                int cnt = ammo.GetSlotCount(i);
+                bool match = cur != null && string.Equals(cur.name, names[i], StringComparison.OrdinalIgnoreCase) && cnt >= 1;
+                if (match) ok++;
+                sb.Append($" | s{i}={(cur != null ? cur.name : "empty")}x{cnt}");
+            }
+            return $"[ammotest] {(ok == 4 ? "PASS" : "FAIL")} ({ok}/4){sb}";
         }
     }
 

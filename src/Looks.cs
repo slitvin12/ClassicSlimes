@@ -843,7 +843,7 @@ namespace ClassicSlimes
         public static Material GlintMat => FlareMat;
 
         static Material _qsStreak;
-        /// <summary>Quicksilver dash streak: a soft camera-facing ribbon (bright core, feathered edges; colour from the trail).</summary>
+        /// <summary>Quicksilver dash streak: crisp camera-facing dual-rail mercury ribbon.</summary>
         public static Material QsStreakMat
         {
             get
@@ -851,15 +851,17 @@ namespace ClassicSlimes
                 if (_qsStreak != null) return _qsStreak;
                 var m = Mat.Clone("QsStreak", "DazedStars", "CFX_Particles", "Gold Slime Sparkle");
                 if (m == null) return null;
-                m.Tx("_MainTex", Gfx.Generated("qsstreak", 8, 64, (x, y) =>
+                m.Tx("_MainTex", Gfx.Generated("qsstreak_v2", 16, 64, (x, y) =>
                 {
-                    float v = (y + 0.5f) / 64f * 2f - 1f;
-                    float a = Mathf.Exp(-v * v * 6f) * 0.7f + Mathf.Exp(-v * v * 45f) * 0.6f;
-                    return new Color(1f, 1f, 1f, Mathf.Clamp01(a));
+                    float v = Mathf.Abs((y + 0.5f) / 64f * 2f - 1f);
+                    float core = Mathf.Exp(-v * v * 9f) * 0.95f;
+                    float rail = Mathf.Exp(-Mathf.Pow((v - 0.54f) * 7.5f, 2f)) * 0.78f;
+                    float glow = Mathf.Clamp01(1f - v) * 0.35f;
+                    return new Color(1f, 1f, 1f, Mathf.Clamp01(core + rail + glow));
                 }));
-                m.Col("_Tint", new Color(1.1f, 1.1f, 1.1f, 1f));
-                m.Col("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.8f));
-                m.Flt("_DepthFadeDistance", 0.1f);
+                m.Col("_Tint", new Color(2.25f, 2.35f, 2.60f, 1f));
+                m.Col("_TintColor", new Color(0.92f, 0.96f, 1.00f, 1f));
+                m.Flt("_DepthFadeDistance", 0.03f);
                 _qsStreak = Keep(m, "QsStreak");
                 return _qsStreak;
             }

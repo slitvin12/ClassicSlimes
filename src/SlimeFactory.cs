@@ -279,11 +279,16 @@ namespace ClassicSlimes
 
             try
             {
-                Library.CreatePediaEntryForSlime(def, s.Key + "_slime",
+                var pe = Library.CreatePediaEntryForSlime(def, s.Key + "_slime",
                     Library.CreateLocalizedString("m.intro." + s.Key + "_slime", "Pedia"),
                     Library.CreateLocalizedString("m.slimeology." + s.Key + "_slime", "Pedia"),
                     Library.CreateLocalizedString("m.risks." + s.Key + "_slime", "Pedia"),
                     Library.CreateLocalizedString("m.plortonomics." + s.Key + "_slime", "Pedia"));
+                if (pe != null)
+                {
+                    UnityEngine.Object.DontDestroyOnLoad(pe);
+                    pe.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+                }
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning($"Pedia for {s.Name} failed: {e.Message}"); }
         }

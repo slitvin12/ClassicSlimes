@@ -1371,21 +1371,25 @@ namespace ClassicSlimes
 
         class Swap { public Renderer R; public int I; public Material Orig, Applied; }
 
-        static readonly Color StreakHead = new(0.86f, 0.9f, 1f, 0.55f), StreakTail = new(0.55f, 0.62f, 0.75f, 0f);
-        static readonly Color ChargedHead = new(0.45f, 0.86f, 1f, 0.8f), ChargedTail = new(0.15f, 0.45f, 1f, 0f);
-        static readonly Color RadStreakHead = new(1.00f, 0.78f, 0.90f, 0.65f), RadStreakTail = new(0.62f, 0.30f, 0.78f, 0f);
-        static readonly Color RadChargedHead = new(1.00f, 0.85f, 0.35f, 0.88f), RadChargedTail = new(0.92f, 0.25f, 0.82f, 0f);
+        static readonly Color StreakHead = new(0.84f, 0.96f, 1.00f, 0.92f), StreakTail = new(0.25f, 0.48f, 0.80f, 0f);
+        static readonly Color StreakCoreHead = new(1.00f, 1.00f, 1.00f, 0.98f), StreakCoreTail = new(0.65f, 0.92f, 1.00f, 0f);
+        static readonly Color ChargedHead = new(0.40f, 0.92f, 1.00f, 0.96f), ChargedTail = new(0.08f, 0.25f, 0.95f, 0f);
+        static readonly Color ChargedCoreHead = new(1.00f, 1.00f, 1.00f, 1.00f), ChargedCoreTail = new(0.45f, 0.95f, 1.00f, 0f);
+        static readonly Color RadStreakHead = new(1.00f, 0.78f, 0.94f, 0.92f), RadStreakTail = new(0.35f, 0.85f, 1.00f, 0f);
+        static readonly Color RadCoreHead = new(1.00f, 0.96f, 0.98f, 0.98f), RadCoreTail = new(0.95f, 0.65f, 1.00f, 0f);
+        static readonly Color RadChargedHead = new(1.00f, 0.92f, 0.35f, 0.96f), RadChargedTail = new(0.55f, 0.18f, 0.95f, 0f);
+        static readonly Color RadChargedCoreHead = new(1.00f, 0.98f, 0.82f, 1.00f), RadChargedCoreTail = new(1.00f, 0.60f, 0.95f, 0f);
 
         SlimeAppearanceApplicator _app;
         Rigidbody _rb;
         Vacuumable _vac;
         SECTR_PointSource _loop;
         ParticleSystem _crackle, _shine;
-        TrailRenderer _streak;
+        TrailRenderer _streak, _streakCore;
         readonly List<Swap> _swaps = new();
         float _chargedUntil, _nextDash, _nextZap, _nextSpark, _nextCrackle, _nextStatic, _nextShine, _zigAt = -1f;
-        bool _wasCharged, _chargedLook, _streakOn, _lastRadiant;
-        Vector3 _zigDir;
+        bool _wasCharged, _chargedLook, _streakOn, _lastRadiant, _rotLocked;
+        Vector3 _zigDir, _upDir = Vector3.up;
 
         bool IsRadiant => _app != null && RadiantLooks.IsRadiantAppearance(_app.Appearance);
 
@@ -1398,12 +1402,12 @@ namespace ClassicSlimes
         bool _homeSet;
         // chased: it outruns the rancher, jinks out of the vacuum cone and resists the vacuum until it tires out
         // (it has to be kept in the cone for a while), skirting boulders/cliffs and hugging hills without launching
-        float _stamina = 1f, _tiredUntil, _jinkSide = 1f, _nextJink, _climbUntil, _nextClimbRoll, _fleeUntil, _fledAt = -100f;
+        float _stamina = 1f, _staminaHoldUntil, _tiredUntil, _jinkSide = 1f, _nextJink, _climbUntil, _nextClimbRoll, _fleeUntil, _fledAt = -100f;
         float _avoidUntil, _avoidLockUntil, _avoidSide = 1f;
         Vector3 _climbTop, _climbDir, _avoidDir;
         bool _noForces, _wasTired;
         public static float RunSpeed = 9.5f, ChargedSpeed = 13.5f, FleeSpeed = 16.5f, MaxSpeed = 26f, Grip = 38f, FleeGrip = 68f, TetherRadius = 40f;
-        public static float FleeRadius = 14f, ResistTime = 1.4f, TiredTime = 2.8f, ClimbHeight = 1.8f, ClimbSpeed = 6.5f;
+        public static float FleeRadius = 14f, ResistTime = 0.85f, TiredTime = 4.2f, ClimbHeight = 1.8f, ClimbSpeed = 6.5f;
         /// <summary>Dev: pretend the vacpack is sucking along the camera's view until then.</summary>
         public static float DevAimUntil;
 
@@ -1434,6 +1438,7 @@ namespace ClassicSlimes
             {
                 _fleeUntil = 0f; _climbUntil = 0f; _boostUntil = 0f; _avoidUntil = 0f; _avoidLockUntil = 0f; _zigAt = -1f;
                 SetNoForces(false);
+                SetRunnerConstraints(false);
                 if (_rb != null && !_rb.isKinematic) _rb.linearVelocity = Vector3.zero;
             }
         }
@@ -1444,6 +1449,25 @@ namespace ClassicSlimes
             SetNoForces(false);
         }
 
+        void SetRunnerConstraints(bool lockRot)
+        {
+            if (_rb == null) return;
+            if (lockRot)
+            {
+                if (!_rotLocked)
+                {
+                    _rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+                    _rotLocked = true;
+                }
+                if (!_rb.isKinematic) _rb.angularVelocity = Vector3.zero;
+            }
+            else if (_rotLocked)
+            {
+                _rb.constraints = RigidbodyConstraints.None;
+                _rotLocked = false;
+            }
+        }
+
         public bool Charged => Time.time < _chargedUntil;
         public bool Tired => Time.time < _tiredUntil;
 
@@ -1452,6 +1476,12 @@ namespace ClassicSlimes
             _app = GetComponent<SlimeAppearanceApplicator>();
             _rb = GetComponent<Rigidbody>();
             _vac = GetComponent<Vacuumable>();
+            try
+            {
+                var rbs = GetComponentInChildren<Il2CppMonomiPark.SlimeRancher.Slime.SquashWobble.RubberBoneEffectShader>(true);
+                if (rbs != null) rbs.groundStickiness = 0f;
+            }
+            catch { }
             _loop = Snd.Loop(gameObject, Snd.QsAura);
             float now = Time.time;
             _nextDash = now + U.Rand(1f, 4f);
@@ -1466,9 +1496,12 @@ namespace ClassicSlimes
             // chrome shine: a white star glint on the upper body now and then
             _shine = Gfx.Sparkles("QsShine", transform, new Vector3(0f, 0.78f, 0.12f), Visuals.StarMat,
                 Color.white, new Color(0.86f, 0.93f, 1f, 1f), 0f, 0.42f, 0.22f, 0.36f, 0.26f, 3);
-            _streak = Gfx.Ribbon("QsStreak", transform, new Vector3(0f, 0.42f, 0f), Visuals.QsStreakMat, 0.22f, 0.62f, 0.04f,
+            _streak = Gfx.Ribbon("QsStreak", transform, new Vector3(0f, 0.50f, -0.18f), Visuals.QsStreakMat, 0.48f, 0.84f, 0.14f,
                 _lastRadiant ? RadStreakHead : StreakHead, _lastRadiant ? RadStreakTail : StreakTail);
-            if (_streak != null) { _streak.textureMode = LineTextureMode.Stretch; _streak.emitting = false; }
+            if (_streak != null) { _streak.textureMode = LineTextureMode.Stretch; _streak.minVertexDistance = 0.05f; _streak.emitting = false; }
+            _streakCore = Gfx.Ribbon("QsStreakCore", transform, new Vector3(0f, 0.50f, -0.16f), Visuals.QsStreakMat, 0.34f, 0.36f, 0.04f,
+                _lastRadiant ? RadCoreHead : StreakCoreHead, _lastRadiant ? RadCoreTail : StreakCoreTail);
+            if (_streakCore != null) { _streakCore.textureMode = LineTextureMode.Stretch; _streakCore.minVertexDistance = 0.05f; _streakCore.emitting = false; }
             _yaw = YawOf(transform.forward);
             _nextPause = now + U.Rand(5f, 10f);
             if (Cfg.QuicksilverRuns.Value)
@@ -1553,7 +1586,7 @@ namespace ClassicSlimes
 
         // the rancher as the quicksilvers see it (shared, sensed once per physics step): ground speed, the vacpack's suction
         static float _plAt = -1f, _plSpeed, _vacRange;
-        static Vector3 _plPos, _vacEye, _vacFwd;
+        static Vector3 _plPos, _vacEye, _vacFwd, _vacNozzle, _vacNozzleFwd;
         static bool _vacOn;
         static Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem _vacItem;
 
@@ -1577,11 +1610,15 @@ namespace ClassicSlimes
             if (cam == null) return;
             try
             {
-                if (_vacItem == null) _vacItem = SceneContext.Instance.PlayerState.VacuumItem;
-                if (_vacItem != null && _vacItem._vacMode == Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.VacMode.VAC)
+                var liveVac = SceneContext.Instance?.PlayerState?.VacuumItem;
+                if (liveVac != null) _vacItem = liveVac;
+                else if (_vacItem != null && !_vacItem.isActiveAndEnabled) _vacItem = null;
+
+                if (_vacItem != null && _vacItem.isActiveAndEnabled
+                    && _vacItem._vacMode == Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.VacMode.VAC)
                 {
                     _vacOn = true;
-                    _vacRange = Mathf.Max(6f, _vacItem.MaxVacDist);
+                    _vacRange = Mathf.Max(8f, _vacItem.MaxVacDist);
                 }
             }
             catch { _vacItem = null; }
@@ -1589,16 +1626,46 @@ namespace ClassicSlimes
             if (!_vacOn) return;
             _vacEye = cam.transform.position;
             _vacFwd = cam.transform.forward;
+            var vo = _vacItem != null && _vacItem.VacOrigin != null ? _vacItem.VacOrigin.transform : cam.transform;
+            _vacNozzle = vo.position;
+            _vacNozzleFwd = vo.forward;
         }
 
-        /// <summary>In the vacpack's suction cone (in range, near the aim line).</summary>
-        static bool InVac(Vector3 center)
+        /// <summary>In the vacpack's suction cone (tracker overlap, barrel cone, or camera aim cone).</summary>
+        static bool InVac(Vector3 center) => InVac(null, center);
+
+        static bool InVac(GameObject go, Vector3 center)
         {
             if (!_vacOn) return false;
+            try
+            {
+                var set = _vacItem?._tracker?._gameObjSet;
+                if (go != null && set != null && set.Contains(go)) return true;
+            }
+            catch { }
+            var toNozzle = center - _vacNozzle;
+            float dn = toNozzle.magnitude;
+            if (dn < 2.4f) return true;
+            if (dn <= _vacRange + 1.5f && Vector3.Angle(_vacNozzleFwd, toNozzle) < (dn < 4.5f ? 42f : 26f))
+                return true;
             var to = center - _vacEye;
             float d = to.magnitude;
             if (d > _vacRange + 1.5f || d < 0.01f) return false;
-            return Vector3.Angle(_vacFwd, to) < (d < 3f ? 35f : 22f);
+            return Vector3.Angle(_vacFwd, to) < (d < 4.5f ? 40f : 26f);
+        }
+
+        /// <summary>True whenever the vacpack has physically grabbed this slime (held, captive spring-joint, launched, or animating into the slot).</summary>
+        public bool IsVacCaptured()
+        {
+            if (_vac == null) return false;
+            if (_vac.IsHeld() || _vac.IsLaunched() || _vac.IsCaptive()) return true;
+            try
+            {
+                if (_vacItem != null && _vacItem._animatingConsume != null && _vacItem._animatingConsume.Contains(_vac))
+                    return true;
+            }
+            catch { }
+            return GetComponent<Il2CppMonomiPark.SlimeRancher.Player.PlayerItems.VacuumItem.MoveTowards>() != null;
         }
 
         /// <summary>Stamina: drains while it is in the suction cone (it resists: no vacuum forces), then it is tired out for a moment.</summary>
@@ -1611,10 +1678,14 @@ namespace ClassicSlimes
             {
                 if (aimed)
                 {
-                    _stamina -= dt / (ResistTime * (charged ? 1.6f : 1f));
-                    if (_stamina <= 0f) { _stamina = 0f; _tiredUntil = now + TiredTime * (charged ? 0.6f : 1f); tired = true; Exhausted(); }
+                    _staminaHoldUntil = now + 0.45f;
+                    _stamina -= dt / (ResistTime * (charged ? 1.35f : 1f));
+                    if (_stamina <= 0f) { _stamina = 0f; _tiredUntil = now + TiredTime * (charged ? 0.85f : 1f); tired = true; Exhausted(); }
                 }
-                else _stamina = Mathf.Min(1f, _stamina + dt / 4f);
+                else if (now >= _staminaHoldUntil)
+                {
+                    _stamina = Mathf.Min(1f, _stamina + dt / 6.5f);
+                }
             }
             SetNoForces(aimed && !tired);
         }
@@ -1647,6 +1718,7 @@ namespace ClassicSlimes
             if (IsSeated)
             {
                 SetNoForces(false);
+                SetRunnerConstraints(false);
                 _climbUntil = 0f;
                 _fleeUntil = 0f;
                 _boostUntil = 0f;
@@ -1654,10 +1726,15 @@ namespace ClassicSlimes
                 _avoidLockUntil = 0f;
                 return;
             }
-            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) || (_vac != null && (_vac.IsHeld() || _vac.IsLaunched())))
+            if (!Cfg.QuicksilverRuns.Value || _rb == null || _rb.isKinematic || (CoopCompat.IsCoop && !CoopCompat.IsLocallySimulated(_rb)) || IsVacCaptured())
             {
                 SetNoForces(false);
+                SetRunnerConstraints(false);
                 _climbUntil = 0f;
+                _fleeUntil = 0f;
+                _boostUntil = 0f;
+                _avoidUntil = 0f;
+                _avoidLockUntil = 0f;
                 return;
             }
             Sense();
@@ -1665,11 +1742,12 @@ namespace ClassicSlimes
             float now = Time.time, dt = Time.fixedDeltaTime;
             var pos = transform.position;
             bool charged = Charged;
-            bool aimed = InVac(pos + Vector3.up * (0.5f * s));
+            bool aimed = InVac(gameObject, pos + Vector3.up * (0.5f * s));
             Stamina(now, dt, aimed, charged);
             bool tired = now < _tiredUntil;
-            if (now < _climbUntil) { Climb(pos, s, charged); return; }
-            if (tired && aimed) return;   // worn out: the vacuum gets it
+            if (now < _climbUntil) { SetRunnerConstraints(true); Climb(pos, s, charged); return; }
+            if (tired && (aimed || (_vacOn && Vector3.Distance(pos, _vacNozzle) < _vacRange + 2.5f))) { SetRunnerConstraints(false); return; }   // worn out: the vacuum gets it
+            SetRunnerConstraints(true);
 
             bool hasGround = Physics.Raycast(pos + Vector3.up * (0.45f * s), Vector3.down, out var gndHit, 1.35f * s, U.GroundMask, QueryTriggerInteraction.Ignore);
             float baseY = hasGround ? gndHit.point.y : pos.y - 0.50f * s;
@@ -1683,6 +1761,8 @@ namespace ClassicSlimes
                     _rb.linearVelocity = airV;
                 }
                 _rb.AddForce(Vector3.down * 18f, ForceMode.Acceleration);
+                _upDir = Vector3.Slerp(_upDir, Vector3.up, 12f * dt).normalized;
+                _rb.MoveRotation(Quaternion.LookRotation(Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward, _upDir));
                 return;
             }
 
@@ -1707,6 +1787,7 @@ namespace ClassicSlimes
             {
                 _fledAt = now;
                 speed = Mathf.Min(Mathf.Max(FleeSpeed, _plSpeed * 1.35f + 4.0f) * (charged ? 1.22f : 1f), MaxSpeed * (charged ? 1.18f : 1f));
+                if (aimed) speed *= Mathf.Lerp(0.42f, 0.68f, _stamina);
                 var awayDir = plDist > 0.01f ? away / plDist : transform.forward;
                 var idealDir = awayDir;
                 if (aimed)
@@ -1717,12 +1798,12 @@ namespace ClassicSlimes
                     if (side.sqrMagnitude > 1e-4f)
                     {
                         var sn = side.normalized;
-                        var cand1 = (sn * (0.95f * _jinkSide) + awayDir).normalized;
+                        var cand1 = (sn * (0.52f * _jinkSide) + awayDir).normalized;
                         if (Look(pos, baseY, cand1, s, speed, maxDrop, out _) == Ahead.Clear)
                             idealDir = cand1;
                         else
                         {
-                            var cand2 = (sn * (-0.95f * _jinkSide) + awayDir).normalized;
+                            var cand2 = (sn * (-0.52f * _jinkSide) + awayDir).normalized;
                             if (Look(pos, baseY, cand2, s, speed, maxDrop, out _) == Ahead.Clear)
                             {
                                 _jinkSide = -_jinkSide;
@@ -1896,7 +1977,14 @@ namespace ClassicSlimes
             if (dv.magnitude > maxDv) dv = dv.normalized * maxDv;
             _rb.AddForce(dv, ForceMode.VelocityChange);
             if (gndHit.normal.y >= 0.74f) _rb.AddForce(-gndHit.normal * (fleeing ? 26f : 16f), ForceMode.Acceleration);
-            if (speed > 0.5f) _rb.MoveRotation(Quaternion.Slerp(_rb.rotation, Quaternion.LookRotation(dir, Vector3.up), (fleeing ? 15f : 10f) * dt));
+            var wantUp = gndHit.normal.y >= 0.74f ? Vector3.Slerp(Vector3.up, gndHit.normal, 0.50f).normalized : Vector3.up;
+            _upDir = Vector3.Slerp(_upDir, wantUp, 14f * dt).normalized;
+            var horizFwd = Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+            var lookFwd = Vector3.ProjectOnPlane(horizFwd, _upDir);
+            if (lookFwd.sqrMagnitude < 1e-4f) lookFwd = horizFwd;
+            lookFwd.Normalize();
+            if (lookFwd.y < -0.10f) { lookFwd.y = -0.10f; lookFwd.Normalize(); }
+            _rb.MoveRotation(Quaternion.LookRotation(lookFwd, _upDir));
             if (now > _nextPause)
             {
                 _nextPause = now + U.Rand(5f, 12f);
@@ -1954,7 +2042,8 @@ namespace ClassicSlimes
         {
             float now = Time.time;
             var v = _rb != null ? _rb.linearVelocity : Vector3.zero;
-            return $"{name} v {new Vector2(v.x, v.z).magnitude:0.0}/{v.y:0.0} stamina {_stamina:0.00} tired {now < _tiredUntil} flee {now < _fleeUntil} climb {now < _climbUntil} " +
+            float pitch = transform.eulerAngles.x; if (pitch > 180f) pitch -= 360f;
+            return $"{name} v {new Vector2(v.x, v.z).magnitude:0.0}/{v.y:0.0} pitch {pitch:0.0} stamina {_stamina:0.00} tired {now < _tiredUntil} flee {now < _fleeUntil} climb {now < _climbUntil} " +
                    $"charged {Charged} grounded {U.Grounded(transform, Mathf.Max(0.3f, transform.lossyScale.x))} rancher {_plSpeed:0.0} m/s vac {_vacOn} in {InVac(transform.position + Vector3.up * 0.5f)} noForces {_noForces} home {Vector3.Distance(_home, transform.position):0}m";
         }
 
@@ -1962,6 +2051,7 @@ namespace ClassicSlimes
         {
             try { if (_chargedLook) SetChargedLook(false); } catch { }
             SetNoForces(false);
+            SetRunnerConstraints(false);
             _climbUntil = 0f;
         }
 
@@ -1996,7 +2086,7 @@ namespace ClassicSlimes
                 }
             }
             bool seated = IsSeated;
-            bool held = (_vac != null && _vac.IsHeld()) || seated;
+            bool held = IsVacCaptured() || seated;
             bool charged = Charged;
             float left = _chargedUntil - now;
             // the charge flickers out over its last two seconds
@@ -2104,17 +2194,39 @@ namespace ClassicSlimes
             if (_crackle != null) _crackle.Emit(10);
         }
 
-        /// <summary>Silver (charged: electric-blue / radiant rose-plasma) streak while it moves fast; hysteresis so it doesn't stutter.</summary>
+        /// <summary>Silver (charged: electric-blue / radiant rose-plasma) layered speed ribbons while moving fast; hysteresis so it doesn't stutter.</summary>
         void UpdateStreak(bool held, bool charged)
         {
-            if (_streak == null) return;
+            if (_streak == null && _streakCore == null) return;
+            if (held)
+            {
+                _streakOn = false;
+                if (_streak != null) { _streak.emitting = false; _streak.Clear(); }
+                if (_streakCore != null) { _streakCore.emitting = false; _streakCore.Clear(); }
+                return;
+            }
             float v = _rb != null && !_rb.isKinematic ? _rb.linearVelocity.magnitude : 0f;
-            bool on = !held && (_streakOn ? v > 2.5f : v > 4f);
-            if (on != _streakOn) { _streakOn = on; Gfx.SetEmitting(_streak, on); }
+            bool on = _streakOn ? v > 1.1f : v > 2.0f;
+            if (on != _streakOn)
+            {
+                _streakOn = on;
+                if (_streak != null) _streak.emitting = on;
+                if (_streakCore != null) _streakCore.emitting = on;
+            }
             if (!on) return;
             bool rad = IsRadiant;
-            _streak.startColor = rad ? (charged ? RadChargedHead : RadStreakHead) : (charged ? ChargedHead : StreakHead);
-            _streak.endColor = rad ? (charged ? RadChargedTail : RadStreakTail) : (charged ? ChargedTail : StreakTail);
+            if (_streak != null)
+            {
+                _streak.time = charged ? 0.62f : 0.48f;
+                _streak.startColor = rad ? (charged ? RadChargedHead : RadStreakHead) : (charged ? ChargedHead : StreakHead);
+                _streak.endColor = rad ? (charged ? RadChargedTail : RadStreakTail) : (charged ? ChargedTail : StreakTail);
+            }
+            if (_streakCore != null)
+            {
+                _streakCore.time = charged ? 0.46f : 0.34f;
+                _streakCore.startColor = rad ? (charged ? RadChargedCoreHead : RadCoreHead) : (charged ? ChargedCoreHead : StreakCoreHead);
+                _streakCore.endColor = rad ? (charged ? RadChargedCoreTail : RadCoreTail) : (charged ? ChargedCoreTail : StreakCoreTail);
+            }
         }
 
         /// <summary>Dev: dash right now (away from the camera's right so it crosses the view).</summary>
