@@ -6,7 +6,7 @@
 
 > *English:* Classic Slimes brings five Slime Rancher 1 slimes (Rad, Quantum, Mosaic, Quicksilver, Glitch), 63 SR1-styled largos, 3 classic gordos, SR1 foods (Oca Oca, Silver Parsnip, Phase Lemon) and an expanded 29-slot Plort Market to Slime Rancher 2 on MelonLoader + CottonForge, with Lycoreia 2.0 / 2.1.0-rc4 co-op support.
 
-**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.7 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
+**Автор:** [slitvin12](https://github.com/slitvin12) · **Версия:** 1.3.8 · **Требования:** Slime Rancher 2 **1.3.0** (Windows), [MelonLoader](https://github.com/LavaGang/MelonLoader) **0.7+**, [CottonForge](https://github.com/slitvin12/CottonForge) **0.3.2** · Неофициальный фанатский мод, не связан с Monomi Park.
 
 ## Установка
 Нужны только **Slime Rancher 2** и **MelonLoader 0.7+**. **Slime Rancher 1 не нужен:** модели, текстуры, звуки и
@@ -20,12 +20,20 @@
    `CottonLibrary.dll` одновременно нельзя). CottonForge — прямая замена: другие Cotton-моды работают без пересборки.
 3. Скачать `ClassicSlimes.dll` из [релиза](https://github.com/slitvin12/ClassicSlimes/releases/latest) и положить
    туда же. Итог: `Mods\CottonLibrary.dll` + `Mods\ClassicSlimes.dll`.
-4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.7`.
+4. Запустить игру. В `MelonLoader\Latest.log` должны быть строки `CottonForge 0.3.2 ...` и `Classic Slimes v1.3.8`.
    Первый показ главного меню на ~10 с дольше обычного — генерируются ларго.
 
 Версии 1.2.x–1.3.x рассчитаны на CottonForge (ларго в стиле SR1 строятся его движком). С оригинальным Cotton 0.3.1 мод
 должен запускаться без этих стилей, но такая связка в 1.2.x–1.3.x не проверялась.
 Удаление — убрать `ClassicSlimes.dll`; слаймы и ларго мода при этом пропадут из сохранения (см. «Известные проблемы»).
+
+## Новое в 1.3.8
+
+- **Исправление тел и частей лучистых Mosaic-ларго (`SlimeFacets`, `ElasticGlass`, `ClassicSurfaces`).** Устранено ложное срабатывание `IsPlainBody` по подстроке `MosaicRadiant`: лучистые мозаичные ларго и их уши/хвосты/крылья сохраняют окрас и узоры второго родителя без натягивания 115-гранной оболочки тела на мелкие части; корректно применяется радужное стекло `RadiantGlass` на оба порядка скрещивания и сохраняется сияние на нестандартных телах вроде `Crystal`.
+- **Дикие лучистые спавны в `RadiantSlimeConfig` и защита Слаймопедии.** `Mosaic`, `Rad`, `Glitch` и `Quicksilver` добавляются в `_radiantShuffleBagSizes` (с обновлением `RadiantSlimeDirector.ResizeBagsIfNeeded`), а `UnlockRadiantPediaEntry` защищён безопасным финализатором при сборе классических лучистых слаймов.
+- **Выделенный источник звука счётчика Гейгера (`RadHud`) и точный спавн лучистых ларго (`DevSpawn`).** `RadHud.AudioTick` использует отдельный `SECTR_PointSource` без конфликта с ванильным `PlayerRadAbsorber.FixedUpdate`, а консольная команда `spawnslime <largo> radiant` корректно выставляет `SetRadiant(baseDef)`.
+- **Исправление спавна Quicksilver, загрузки сохранений с Фазовым лимоном и Harmony-патчей (`Util`, `Visuals`, `Foods`, `Diag`).** `Gc.Array<T>` корректно записывает IL2CPP value-type структуры (`SlimeAppearanceMaterials`), устраняя `NullReferenceException` при появлении обычного и лучистого Quicksilver; `ClearPhaseFromIgnoreOnLoad` больше не обнуляет `GameModel.phaseLemonIdent` (`BasicActorModel -> ProduceModel`), а `SpawnResource.GetFastForwardGroups` и `Diag.Enabled` (до инициализации `Cfg`) патчатся без ошибок при запуске.
+- **Живая внутриигровая проверка в SR2 1.3.0** (мост `CreatorToolkitAgentDirector`, консоль `DevCmd`, Слаймопедия Mosaic, все Radiant-варианты и ларго, аура Rad-гордо и счётчик Гейгера, бег Quicksilver и прыжки Glitch, полный цикл посадки и сбивания Phase Lemon — 0 ошибок в логе).
 
 ## Новое в 1.3.7
 

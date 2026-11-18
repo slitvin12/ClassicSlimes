@@ -73,6 +73,11 @@ namespace ClassicSlimes
         public static Il2CppReferenceArray<T> Array<T>(IList<T> items) where T : Il2CppObjectBase
         {
             var arr = new Il2CppReferenceArray<T>(items.Count);
+            if (IL2CPP.il2cpp_class_is_valuetype(Il2CppClassPointerStore<T>.NativeClassPtr))
+            {
+                for (int i = 0; i < items.Count; i++) arr[i] = items[i];
+                return arr;
+            }
             IntPtr start = IntPtr.Add(arr.Pointer, 4 * IntPtr.Size);   // Il2CppObject (2 ptr) + bounds + max_length
             for (int i = 0; i < items.Count; i++)
                 IL2CPP.il2cpp_gc_wbarrier_set_field(arr.Pointer, IntPtr.Add(start, i * IntPtr.Size), items[i] == null ? IntPtr.Zero : items[i].Pointer);

@@ -95,9 +95,9 @@ namespace ClassicSlimes
             smr.shadowCastingMode = shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             var sao = go.GetComponent<SlimeAppearanceObject>();
             sao.RootBone = (Bone)root;
+            sao.ParentBone = Bone.NONE;
             if (attached != null)
             {
-                sao.ParentBone = Bone.NONE;
                 sao.AttachedBones = new Il2CppStructArray<Bone>(attached.Select(i => (Bone)i).ToArray());
             }
             sao.IgnoreLODIndex = true;
@@ -126,7 +126,7 @@ namespace ClassicSlimes
                 {
                     var arr = new SlimeAppearanceMaterials[prefabs.Length];
                     for (int i = 0; i < arr.Length; i++) arr[i] = em[Math.Min(i, em.Length - 1)];
-                    st.ElementMaterials = Gc.Array(arr);
+                    st.ElementMaterials = new Il2CppReferenceArray<SlimeAppearanceMaterials>(arr);
                 }
             }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("ElementMaterials: " + e.Message); }

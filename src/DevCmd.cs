@@ -104,6 +104,7 @@ namespace ClassicSlimes
                     var ps = SceneContext.Instance.PlayerState;
                     ClassicSlimesMod.Log.Msg($"[cmd] hp={ps.GetCurrHealth()}/{ps.GetMaxHealth()} rad={ps.GetCurrRad()}");
                     break;
+                case "audioinfo": L(RadSlime.AudioDiag()); break;
                 case "dumpx": DiagX.Run(); break;
                 case "flt": foreach (var m in Tune(a[1])) m.SetFloat(a[2], F(a, 3, 0f)); break;
                 case "col": foreach (var m in Tune(a[1])) m.SetColor(a[2], new Color(F(a, 3, 0f), F(a, 4, 0f), F(a, 5, 0f), F(a, 6, 1f))); break;

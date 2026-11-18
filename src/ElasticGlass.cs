@@ -376,9 +376,12 @@ namespace ClassicSlimes
                 }
                 bool isLargo = false;
                 try { var eat = source.GetComponentInParent<Il2Cpp.SlimeEat>(); isLargo = eat != null && eat.SlimeDefinition != null && eat.SlimeDefinition.IsLargo; } catch { }
-                bool isRadMosaic = material != null && material.name.Contains("MosaicRadiant", StringComparison.Ordinal);
+                bool isRadMosaic = material != null && (material == GordoFacets.RadiantTiles || material == GordoFacets.RadiantSmoothMat);
+                if (!isRadMosaic)
+                {
+                    try { var ap = source.GetComponentInParent<Il2Cpp.SlimeAppearanceApplicator>(); isRadMosaic = ap != null && RadiantLooks.IsRadiantAppearance(ap.Appearance); } catch { }
+                }
                 Renderer.sharedMaterial = (Shell != null ? (isRadMosaic ? GordoFacets.RadiantGlass() : GordoFacets.Glass(isLargo)) : null)
-                    ?? (isRadMosaic ? GordoFacets.RadiantGlass() : null)
                     ?? Visuals.MosaicElasticGlassMaterial(isLargo);
                 Renderer.shadowCastingMode = ShadowCastingMode.Off; Renderer.receiveShadows = false;
                 Renderer.reflectionProbeUsage = source.reflectionProbeUsage;

@@ -321,7 +321,7 @@ namespace ClassicSlimes
                         rt._memberIndices?.Remove(_phase);
                     }
                 }
-                if (gm.phaseLemonIdent == _phase) gm.phaseLemonIdent = null;
+                if (_phase != null) gm.phaseLemonIdent = _phase;
             }
             catch { }
         }
@@ -957,20 +957,29 @@ namespace ClassicSlimes
         internal static bool IsLemonTreeGrower(ResourceGrowerDefinition def) =>
             def != null && def._primaryResourceType != null && def._primaryResourceType == _lemon;
 
-        internal static void ConvertFastForwardGroups(SpawnResource sr, ref Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup> result)
+        internal static void ConvertFastForwardGroups(SpawnResource sr, ref Il2CppSystem.Collections.Generic.IEnumerable<DroneFastForwarder.GatherGroup> result)
         {
             if (sr == null || result == null || _phase == null || _lemon == null || !IsLemonTreeGrower(sr._resourceGrowerDefinition)) return;
-            var list = new Il2CppSystem.Collections.Generic.List<SpawnResource.GatherGroup>();
+            var list = new Il2CppSystem.Collections.Generic.List<DroneFastForwarder.GatherGroup>();
             bool changed = false;
             var en = result.Cast<Il2CppSystem.Collections.IEnumerable>().GetEnumerator();
             while (en.MoveNext())
             {
-                var g = en.Current != null ? en.Current.TryCast<SpawnResource.GatherGroup>() : null;
-                if (g == null) continue;
-                if (g.rid == _phase) { list.Add(new SpawnResource.GatherGroup(sr, _lemon, g.rcount)); changed = true; }
-                else list.Add(g);
+                var cur = en.Current;
+                if (cur == null) continue;
+                var sg = cur.TryCast<SpawnResource.GatherGroup>();
+                if (sg != null && sg.rid == _phase)
+                {
+                    list.Add(new SpawnResource.GatherGroup(sr, _lemon, sg.rcount).Cast<DroneFastForwarder.GatherGroup>());
+                    changed = true;
+                }
+                else
+                {
+                    var dg = cur.TryCast<DroneFastForwarder.GatherGroup>();
+                    if (dg != null) list.Add(dg);
+                }
             }
-            if (changed) result = list.Cast<Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup>>();
+            if (changed) result = list.Cast<Il2CppSystem.Collections.Generic.IEnumerable<DroneFastForwarder.GatherGroup>>();
         }
         static int _logged;
         static readonly List<(SpawnResource sr, string food)> Spots = new();
@@ -1022,7 +1031,7 @@ namespace ClassicSlimes
     [HarmonyPatch(typeof(SpawnResource), nameof(SpawnResource.GetFastForwardGroups))]
     static class SpawnResourceFastForwardPatch
     {
-        static void Postfix(SpawnResource __instance, ref Il2CppSystem.Collections.Generic.IEnumerable<SpawnResource.GatherGroup> __result)
+        static void Postfix(SpawnResource __instance, ref Il2CppSystem.Collections.Generic.IEnumerable<DroneFastForwarder.GatherGroup> __result)
         {
             try { Foods.ConvertFastForwardGroups(__instance, ref __result); }
             catch (Exception e) { ClassicSlimesMod.Log.Warning("SpawnResource GetFastForwardGroups: " + e.Message); }
@@ -1033,6 +1042,16 @@ namespace ClassicSlimes
     static class GameModelPhaseLemonPatch
     {
         static void Postfix(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel __instance)
+        {
+            try { Foods.ClearPhaseFromIgnoreOnLoad(__instance); }
+            catch { }
+        }
+    }
+
+    [HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel), nameof(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel.CreateActorModel))]
+    static class GameModelCreatePhaseLemonPatch
+    {
+        static void Prefix(Il2CppMonomiPark.SlimeRancher.DataModel.GameModel __instance)
         {
             try { Foods.ClearPhaseFromIgnoreOnLoad(__instance); }
             catch { }

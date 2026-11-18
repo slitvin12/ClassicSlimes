@@ -141,6 +141,21 @@ namespace ClassicSlimes
             return _radSpeaker == me;
         }
 
+        public static string AudioDiag()
+        {
+            var sp = _radSpeaker;
+            bool hasLoop = sp != null && sp._loop != null;
+            bool loopPlay = false;
+            try { loopPlay = hasLoop && sp._loop.IsPlaying; } catch { }
+            int auraClips = 0, geigerClips = 0;
+            try { auraClips = Snd.RadAura?.AudioClips?.Count ?? 0; } catch { }
+            try { geigerClips = Snd.RadGeiger?.AudioClips?.Count ?? 0; } catch { }
+            float curRad = -1f;
+            try { curRad = SceneContext.Instance?.PlayerState?.GetCurrRad() ?? -1f; } catch { }
+            float expAgo = Time.time - RadHud.LastExposure;
+            return $"radAll={All.Count} speaker={(sp != null ? sp.name : "none")} loop={hasLoop}/{loopPlay} auraClips={auraClips} geiger={RadHud.HasGeigerSource}/{RadHud.IsGeigerPlaying} geigerClips={geigerClips} expAgo={expAgo:0.00}s curRad={curRad:0.0}";
+        }
+
         /// <summary>Dev: switch the dome look of every live rad slime.</summary>
         public static void RestyleAll()
         {

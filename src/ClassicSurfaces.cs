@@ -155,6 +155,7 @@ namespace ClassicSlimes
         static void MosaicNative(SlimeAppearance app, float tint)
         {
             var pal = app._colorPalette;
+            bool isRadApp = RadiantLooks.IsRadiantAppearance(app);
             var source = app._structures;
             // Bodies first: ears, rings and wings that share the body material must get the same new material.
             var bodies = new Dictionary<IntPtr, Material>();
@@ -171,6 +172,8 @@ namespace ClassicSlimes
                 else
                     m = Mat.Clone(src.name + "_MosaicNative", "slimePinkBase", "slimeRockBase");
                 if (m == null) continue;
+                if (isRadApp && !m.IsKeywordEnabled("_ENABLERADIANTEFFECT_ON"))
+                    RadiantLooks.EnableRadiantOnBody(m, pal.Top, pal.Middle, pal.Bottom, 0.55f);
                 // Sloomber's star mode is exclusive with MULTI; Quantum's spiral mask should also remain intact.
                 bool hasSwirl = m.HasProperty("_ColorMask") && (m.GetTexture("_ColorMask")?.name?.IndexOf("quantumSwirl", StringComparison.OrdinalIgnoreCase) >= 0);
                 MosaicSurface(m, pal.Top, pal.Middle, pal.Bottom, tint, !m.IsKeywordEnabled("_BODYCOLORING_SLOOMBER") && !hasSwirl);

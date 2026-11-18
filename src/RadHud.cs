@@ -20,6 +20,9 @@ namespace ClassicSlimes
         static SECTR_PointSource _geiger;
         static IntPtr _geigerPlayerPtr;
 
+        public static bool HasGeigerSource => _geiger != null;
+        public static bool IsGeigerPlaying { get { try { return _geiger != null && _geiger.IsPlaying; } catch { return false; } } }
+
         public static void AudioTick()
         {
             var sc = SceneContext.Instance;
@@ -31,20 +34,7 @@ namespace ClassicSlimes
                 if (_geiger == null || _geigerPlayerPtr != pl.Pointer)
                 {
                     _geigerPlayerPtr = pl.Pointer;
-                    var abs = pl.GetComponent<PlayerRadAbsorber>() ?? pl.GetComponentInChildren<PlayerRadAbsorber>();
-                    if (abs != null && abs.RadAudio != null)
-                    {
-                        _geiger = abs.RadAudio;
-                        _geiger.Cue = Snd.RadGeiger;
-                        _geiger.Loop = true;
-                        _geiger.PlayOnStart = false;
-                        _geiger.Volume = 1f;
-                        _geiger.Pitch = 1f;
-                    }
-                    else
-                    {
-                        _geiger = Snd.Loop(pl, Snd.RadGeiger, "ClassicSlimesRadGeiger");
-                    }
+                    _geiger = Snd.Loop(pl, Snd.RadGeiger, "ClassicSlimesRadGeiger");
                 }
                 if (_geiger != null) Snd.SetPlaying(_geiger, exposed);
             }

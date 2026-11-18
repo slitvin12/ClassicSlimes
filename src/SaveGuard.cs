@@ -52,4 +52,10 @@ namespace ClassicSlimes
                 ClassicSlimesMod.Log.Warning($"Radiant-slime save data pruned/found {unknown.Count} unregistered slime type(s): {string.Join(", ", unknown)}");
         }
     }
+
+    [HarmonyPatch(typeof(Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirector), nameof(Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirector.UnlockRadiantPediaEntry))]
+    static class RadiantUnlockPediaGuard
+    {
+        static Exception Finalizer(Exception __exception) => null;
+    }
 }

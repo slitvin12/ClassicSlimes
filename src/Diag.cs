@@ -22,7 +22,7 @@ namespace ClassicSlimes
         {
             get
             {
-                if (Cfg.Diagnostics.Value) return true;
+                if (Cfg.Diagnostics != null && Cfg.Diagnostics.Value) return true;
                 long now = Environment.TickCount64;
                 if (now >= _nextFlagCheck)
                 {

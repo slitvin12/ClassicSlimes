@@ -53,6 +53,63 @@ namespace ClassicSlimes
             if (TryBuild("Glitch", s => BuildGlitchRadiant(s, pinkRad))) built++;
             if (TryBuild("Quicksilver", s => BuildQuicksilverRadiant(s, pinkRad))) built++;
             ClassicSlimesMod.Log.Msg($"Radiants: built {built} classic RadiantBase variants");
+            try { RegisterRadiantSpawns(); } catch (Exception e) { ClassicSlimesMod.Log.Warning("Radiant spawns register: " + e.Message); }
+        }
+
+        public static void RegisterRadiantSpawns()
+        {
+            if (!Available) return;
+            var classicDefs = new List<SlimeDefinition>();
+            foreach (var n in new[] { "Mosaic", "Rad", "Glitch", "Quicksilver" })
+            {
+                var d = SlimeFactory.Spec(n)?.Def;
+                if (d != null && d.RadiantBase != null) classicDefs.Add(d);
+            }
+            if (classicDefs.Count == 0) return;
+
+            var addedNames = new List<string>();
+            foreach (var cfg in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeConfig>())
+            {
+                if (cfg == null) continue;
+                var existing = cfg._radiantShuffleBagSizes;
+                int bagSize = 150;
+                var list = new List<Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeConfig.RadiantShuffleBagConfigEntry>();
+                var seen = new HashSet<IntPtr>();
+                if (existing != null)
+                {
+                    foreach (var e in existing)
+                    {
+                        if (e == null) continue;
+                        list.Add(e);
+                        if (e.Slime != null)
+                        {
+                            seen.Add(e.Slime.Pointer);
+                            if (e.BagSize > 0 && (e.Slime.name == "Crystal" || e.Slime.name == "Pink"))
+                                bagSize = e.BagSize;
+                        }
+                    }
+                }
+                int addedHere = 0;
+                foreach (var def in classicDefs)
+                {
+                    if (!seen.Add(def.Pointer)) continue;
+                    list.Add(new Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeConfig.RadiantShuffleBagConfigEntry
+                    {
+                        Slime = def,
+                        BagSize = bagSize
+                    });
+                    addedHere++;
+                    if (!addedNames.Contains(def.name)) addedNames.Add(def.name);
+                }
+                if (addedHere > 0) cfg._radiantShuffleBagSizes = Gc.Array(list);
+            }
+            foreach (var rsd in Resources.FindObjectsOfTypeAll<Il2CppMonomiPark.SlimeRancher.Slime.RadiantSlimeDirector>())
+            {
+                if (rsd == null) continue;
+                try { rsd.ResizeBagsIfNeeded(); } catch { }
+            }
+            if (addedNames.Count > 0)
+                ClassicSlimesMod.Log.Msg($"Radiants: registered wild spawn bags for [{string.Join(", ", addedNames)}]");
         }
 
         static bool TryBuild(string name, Action<SlimeSpec> build)

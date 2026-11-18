@@ -51,16 +51,14 @@ namespace ClassicSlimes
             var tiles = GordoFacets.Tiles; var smooth = GordoFacets.SmoothMat;
             var rtiles = GordoFacets.RadiantTiles; var rsmooth = GordoFacets.RadiantSmoothMat;
             return (tiles != null && m == tiles) || (smooth != null && m == smooth)
-                || (rtiles != null && m == rtiles) || (rsmooth != null && m == rsmooth)
-                || m.name.Contains("MosaicRadiant", StringComparison.Ordinal);
+                || (rtiles != null && m == rtiles) || (rsmooth != null && m == rsmooth);
         }
 
         /// <summary>Puts the wanted body (smooth under the facets, else the tiles) on a plain Mosaic body renderer.</summary>
         internal static Material SwapBody(Renderer r, Material m)
         {
             bool radiant = (GordoFacets.RadiantTiles != null && m == GordoFacets.RadiantTiles)
-                || (GordoFacets.RadiantSmoothMat != null && m == GordoFacets.RadiantSmoothMat)
-                || m.name.Contains("MosaicRadiant", StringComparison.Ordinal);
+                || (GordoFacets.RadiantSmoothMat != null && m == GordoFacets.RadiantSmoothMat);
             var want = radiant
                 ? (On && Body == "smooth" ? GordoFacets.RadiantSmooth() : GordoFacets.RadiantTiles)
                 : (On && Body == "smooth" ? GordoFacets.Smooth() : GordoFacets.Tiles);
